@@ -125,6 +125,7 @@ config ARCH_CHIP_TM4C123GH6PM
 	select TIVA_HAVE_GPIOF_IRQS
 	select TIVA_HAVE_ADC0
 	select TIVA_HAVE_ADC1
+	select TIVA_HAVE_CAN1
 	select TIVA_HAVE_QEI0
 	select TIVA_HAVE_QEI1
 
@@ -350,6 +351,7 @@ config ARCH_CHIP_TM4C
 	select ARCH_HAVE_FPU
 	select TIVA_HAVE_ADC0
 	select TIVA_HAVE_ADC1
+	select TIVA_HAVE_CAN0
 	select TIVA_HAVE_I2C1
 	select TIVA_HAVE_I2C2
 	select TIVA_HAVE_I2C3
@@ -420,6 +422,18 @@ config TIVA_HAVE_ADC0
 	default n
 
 config TIVA_HAVE_ADC1
+	bool
+	default n
+
+config TIVA_CAN
+	bool
+	default n
+
+config TIVA_HAVE_CAN0
+	bool
+	default n
+
+config TIVA_HAVE_CAN1
 	bool
 	default n
 
@@ -581,6 +595,20 @@ config TIVA_ADC1
 	default n
 	depends on TIVA_HAVE_ADC0
 	select TIVA_ADC
+
+config TIVA_CAN0
+	bool "CAN0"
+	default n
+	depends on TIVA_HAVE_CAN0
+	select CAN
+	select TIVA_CAN
+
+config TIVA_CAN1
+	bool "CAN1"
+	default n
+	depends on TIVA_HAVE_CAN1
+	select CAN
+	select TIVA_CAN
 
 config TIVA_QEI0
 	bool "QEI0"
@@ -1460,6 +1488,19 @@ config TIVA_ADC_REGDEBUG
 
 endmenu # Tiva ADC Configuration
 endif # TIVA_ADC
+
+menu "CAN Driver Configuration"
+	depends on TIVA_CAN
+
+config TIVA_CAN_REGDEBUG
+	bool "CAN register level debug"
+	depends on  DEBUG_CAN_INFO
+	default n
+	---help---
+		Output detailed register-level CAN device debug information.
+		Requires also CONFIG_DEBUG_CAN_INFO.
+
+endmenu
 
 if TIVA_ETHERNET
 

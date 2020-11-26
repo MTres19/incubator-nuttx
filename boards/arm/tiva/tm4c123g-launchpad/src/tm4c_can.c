@@ -1,8 +1,11 @@
 /****************************************************************************
- * boards/arm/tiva/tm4c123g-launchpad/src/tm4c_bringup.c
+ * boards/arm/tiva/tm4c123g-launchpad/src/tm4c_can.c
  *
- *   Copyright (C) 2014, 2016 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2016 Gregory Nutt. All rights reserved.
+ *   Copyright (C) 2020 Matthew Trescott
  *   Author: Gregory Nutt <gnutt@nuttx.org>
+ * 
+ * Based heavily on stm32_can.c from the boards directory.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -39,9 +42,19 @@
 
 #include <nuttx/config.h>
 
-#include <syslog.h>
+#include <errno.h>
+#include <debug.h>
 
+#include <nuttx/can/can.h>
+#include <arch/board/board.h>
+
+#include "chip.h"
+#include "arm_arch.h"
+
+#include "tiva_can.h"
 #include "tm4c123g-launchpad.h"
+
+#ifdef CONFIG_CAN
 
 /****************************************************************************
  * Pre-processor Definitions
@@ -52,70 +65,64 @@
  ****************************************************************************/
 
 /****************************************************************************
- * Name: tm4c_bringup
+ * Name: tm4c_can_setup
  *
  * Description:
- *   Bring up board features
+ *  Initialize CAN and register the CAN device
  *
  ****************************************************************************/
 
-int tm4c_bringup(void)
+int tm4c_can_setup(void)
 {
-  int ret = OK;
-
-#ifdef CONFIG_TIVA_ADC
-  /* Initialize ADC and register the ADC driver. */
-
-  ret = tm4c_adc_setup();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: tm4c_adc_setup failed: %d\n", ret);
-    }
-#endif
-
 #ifdef CONFIG_TIVA_CAN
-  /* Initialize CAN module and register the CAN driver(s) */
+  struct can_dev_s *can;
+  int ret;
+
+#  ifdef CONFIG_TIVA_CAN0
+  /* Call tiva_can_initialize() to get an instance of CAN interface 0 */
   
-  ret = tm4c_can_setup();
+  can = tiva_can_initialize(0);
+  if (can == NULL)
+    {
+      canerr("ERROR:  Failed to get CAN interface 0\n");
+      return -ENODEV;
+    }
+
+  /* Register the CAN driver at "/dev/can0" */
+
+  ret = can_register("/dev/can0", can);
   if (ret < 0)
     {
-      syslog(LOG_ERR, "ERROR: tm4c_can_setup failed %d\n", ret);
+      canerr("ERROR: can_register failed: %d\n", ret);
+      return ret;
     }
+#  endif /* CONFIG_TIVA_CAN0 */
+
+#  ifdef CONFIG_TIVA_CAN1
+  /* Call tiva_can_initialize() to get an instance of CAN interface 1 */
+  
+  can = tiva_can_initialize(1);
+  if (can == NULL)
+    {
+      canerr("ERROR:  Failed to get CAN interface 1\n");
+      return -ENODEV;
+    }
+
+  /* Register the CAN driver at "/dev/can1" */
+
+  ret = can_register("/dev/can1", can);
+  if (ret < 0)
+    {
+      canerr("ERROR: can_register failed: %d\n", ret);
+      return ret;
+    }
+#  endif /* CONFIG_TIVA_CAN1 */
+
+  return OK;
+#else
+  return -ENODEV;
 #endif
-
-#ifdef HAVE_AT24
-  /* Initialize the AT24 driver */
-
-  ret = tm4c_at24_automount(AT24_MINOR);
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: tm4c_at24_automount failed: %d\n", ret);
-      return ret;
-    }
-#endif /* HAVE_AT24 */
-
-#ifdef CONFIG_TIVA_TIMER
-  /* Initialize the timer driver */
-
-  ret = tiva_timer_configure();
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: tiva_timer_configure failed: %d\n", ret);
-      return ret;
-    }
-#endif /* CONFIG_TIVA_TIMER */
-
-#ifdef CONFIG_CAN_MCP2515
-  /* Configure and initialize the MCP2515 CAN device */
-
-  ret = tiva_mcp2515initialize("/dev/can0");
-  if (ret < 0)
-    {
-      syslog(LOG_ERR, "ERROR: stm32_mcp2515initialize() failed: %d\n", ret);
-      return ret;
-    }
-#endif
-
-  UNUSED(ret);
-  return ret;
 }
+
+#endif /* CONFIG_CAN */
+ 

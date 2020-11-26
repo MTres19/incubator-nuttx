@@ -1,0 +1,453 @@
+/****************************************************************************
+ * arch/arm/src/tiva/hardware/tiva_can.h
+ *
+ *   Copyright (C) 2006-2020 Texas Instruments Incorporated.
+ *                           All rights reserved.
+ *   Author: Matthew Trescott <matthewtrescott@gmail.com>
+ * 
+ * From the TivaWare Peripheral Driver Library, with minor changes for
+ * clarity and style.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *
+ * 1. Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ * 2. Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in
+ *    the documentation and/or other materials provided with the
+ *    distribution.
+ * 3. Neither the name NuttX nor the names of its contributors may be
+ *    used to endorse or promote products derived from this software
+ *    without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
+ * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
+ * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
+ * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
+ * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
+ * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
+ * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
+ * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+ * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
+ * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ * POSSIBILITY OF SUCH DAMAGE.
+ *
+ ****************************************************************************/
+
+#ifndef __ARCH_ARM_SRC_TIVA_HARDWARE_TIVA_CAN_H
+#define __ARCH_ARM_SRC_TIVA_HARDWARE_TIVA_CAN_H
+
+/****************************************************************************
+ * Included Files
+ ****************************************************************************/
+
+/****************************************************************************
+ * Pre-processor Definitions
+ ****************************************************************************/
+
+/****************************************************************************
+ * The following are defines for the CAN register offsets.                  *
+ ****************************************************************************/
+
+#define TIVA_CAN_O_CTL          0x00000000  /* CAN Control                  */
+#define TIVA_CAN_O_STS          0x00000004  /* CAN Status                   */
+#define TIVA_CAN_O_ERR          0x00000008  /* CAN Error Counter            */
+#define TIVA_CAN_O_BIT          0x0000000C  /* CAN Bit Timing               */
+#define TIVA_CAN_O_INT          0x00000010  /* CAN Interrupt                */
+#define TIVA_CAN_O_TST          0x00000014  /* CAN Test                     */
+#define TIVA_CAN_O_BRPE         0x00000018  /* CAN Baud Rate Prescaler      *
+                                             * Extension                    */
+                                             
+#define TIVA_CAN_O_IF1CRQ       0x00000020  /* CAN IF1 Command Request      */
+#define TIVA_CAN_O_IF1CMSK      0x00000024  /* CAN IF1 Command Mask         */
+#define TIVA_CAN_O_IF1MSK1      0x00000028  /* CAN IF1 Mask 1               */
+#define TIVA_CAN_O_IF1MSK2      0x0000002C  /* CAN IF1 Mask 2               */
+#define TIVA_CAN_O_IF1ARB1      0x00000030  /* CAN IF1 Arbitration 1        */
+#define TIVA_CAN_O_IF1ARB2      0x00000034  /* CAN IF1 Arbitration 2        */
+#define TIVA_CAN_O_IF1MCTL      0x00000038  /* CAN IF1 Message Control      */
+#define TIVA_CAN_O_IF1DA1       0x0000003C  /* CAN IF1 Data A1              */
+#define TIVA_CAN_O_IF1DA2       0x00000040  /* CAN IF1 Data A2              */
+#define TIVA_CAN_O_IF1DB1       0x00000044  /* CAN IF1 Data B1              */
+#define TIVA_CAN_O_IF1DB2       0x00000048  /* CAN IF1 Data B2              */
+#define TIVA_CAN_O_IF2CRQ       0x00000080  /* CAN IF2 Command Request      */
+#define TIVA_CAN_O_IF2CMSK      0x00000084  /* CAN IF2 Command Mask         */
+#define TIVA_CAN_O_IF2MSK1      0x00000088  /* CAN IF2 Mask 1               */
+#define TIVA_CAN_O_IF2MSK2      0x0000008C  /* CAN IF2 Mask 2               */
+#define TIVA_CAN_O_IF2ARB1      0x00000090  /* CAN IF2 Arbitration 1        */
+#define TIVA_CAN_O_IF2ARB2      0x00000094  /* CAN IF2 Arbitration 2        */
+#define TIVA_CAN_O_IF2MCTL      0x00000098  /* CAN IF2 Message Control      */
+#define TIVA_CAN_O_IF2DA1       0x0000009C  /* CAN IF2 Data A1              */
+#define TIVA_CAN_O_IF2DA2       0x000000A0  /* CAN IF2 Data A2              */
+#define TIVA_CAN_O_IF2DB1       0x000000A4  /* CAN IF2 Data B1              */
+#define TIVA_CAN_O_IF2DB2       0x000000A8  /* CAN IF2 Data B2              */
+#define TIVA_CAN_O_TXRQ1        0x00000100  /* CAN Transmission Request 1   */
+#define TIVA_CAN_O_TXRQ2        0x00000104  /* CAN Transmission Request 2   */
+#define TIVA_CAN_O_NWDA1        0x00000120  /* CAN New Data 1               */
+#define TIVA_CAN_O_NWDA2        0x00000124  /* CAN New Data 2               */
+#define TIVA_CAN_O_MSG1INT      0x00000140  /* CAN Message 1                *
+                                             * Interrupt Pending            */
+                                             
+#define TIVA_CAN_O_MSG2INT      0x00000144  /* CAN Message 2                *
+                                             * Interrupt Pending            */
+                                             
+#define TIVA_CAN_O_MSG1VAL      0x00000160  /* CAN Message 1 Valid          */
+#define TIVA_CAN_O_MSG2VAL      0x00000164  /* CAN Message 2 Valid          */
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANCTL register.  *
+ ****************************************************************************/
+
+#define TIVA_CAN_CTL_TEST       0x00000080  /* Test Mode Enable */
+#define TIVA_CAN_CTL_CCE        0x00000040  /* Configuration Change Enable */
+#define TIVA_CAN_CTL_DAR        0x00000020  /* Disable Automatic-Retransmission */
+#define TIVA_CAN_CTL_EIE        0x00000008  /* Error Interrupt Enable */
+#define TIVA_CAN_CTL_SIE        0x00000004  /* Status Interrupt Enable */
+#define TIVA_CAN_CTL_IE         0x00000002  /* CAN Interrupt Enable */
+#define TIVA_CAN_CTL_INIT       0x00000001  /* Initialization */
+
+/*****************************************************************************
+ * The following are defines for the bit fields in the CANSTS register.   *
+ *****************************************************************************/
+
+#define TIVA_CAN_STS_BOFF           0x00000080  /* Bus-Off Status               */
+#define TIVA_CAN_STS_EWARN          0x00000040  /* Warning Status               */
+#define TIVA_CAN_STS_EPASS          0x00000020  /* Error Passive                */
+#define TIVA_CAN_STS_RXOK           0x00000010  /* Received a Message Successfully */
+#define TIVA_CAN_STS_TXOK           0x00000008  /* Transmitted a Message        */
+                                                /* Successfully                 */
+#define TIVA_CAN_STS_LEC_MASK       0x00000007  /* Last Error Code              */
+#define TIVA_CAN_STS_LEC_NONE       0x00000000  /* No Error                     */
+#define TIVA_CAN_STS_LEC_STUFF      0x00000001  /* Stuff Error                  */
+#define TIVA_CAN_STS_LEC_FORM       0x00000002  /* Format Error                 */
+#define TIVA_CAN_STS_LEC_ACK        0x00000003  /* ACK Error                    */
+#define TIVA_CAN_STS_LEC_BIT1       0x00000004  /* Bit 1 Error                  */
+#define TIVA_CAN_STS_LEC_BIT0       0x00000005  /* Bit 0 Error                  */
+#define TIVA_CAN_STS_LEC_CRC        0x00000006  /* CRC Error                    */
+#define TIVA_CAN_STS_LEC_NOEVENT    0x00000007  /* No Event                     */
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANERR register.  *
+ ****************************************************************************/
+
+#define TIVA_CAN_ERR_RP             0x00008000  /* Received Error Passive       */
+#define TIVA_CAN_ERR_REC_MASK       0x00007F00  /* Receive Error Counter        */
+#define TIVA_CAN_ERR_TEC_MASK       0x000000FF  /* Transmit Error Counter       */
+#define TIVA_CAN_ERR_REC_SHIFT      8
+#define TIVA_CAN_ERR_TEC_SHIFT      0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANBIT register.  *
+ ****************************************************************************/
+
+#define TIVA_CAN_BIT_TSEG2_MASK    0x00007000  /* Time Segment after Sample Point */
+#define TIVA_CAN_BIT_TSEG1_MASK    0x00000F00  /* Time Segment Before Sample Point */
+#define TIVA_CAN_BIT_SJW_MASK      0x000000C0  /* (Re)Synchronization Jump Width */
+#define TIVA_CAN_BIT_BRP_MASK      0x0000003F  /* Baud Rate Prescaler */
+#define TIVA_CAN_BIT_TSEG2_SHIFT    12
+#define TIVA_CAN_BIT_TSEG1_SHIFT    8
+#define TIVA_CAN_BIT_SJW_SHIFT      6
+#define TIVA_CAN_BIT_BRP_SHIFT      0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANINT register.  *
+ ****************************************************************************/
+
+#define TIVA_CAN_INT_INTID_MASK     0x0000FFFF  /* Interrupt Identifier */
+#define TIVA_CAN_INT_INTID_NONE     0x00000000  /* No interrupt pending */
+#define TIVA_CAN_INT_INTID_STATUS   0x00008000  /* Status Interrupt     */
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANTST register.  *
+ ****************************************************************************/
+
+#define TIVA_CAN_TST_RX             0x00000080  /* Receive Observation  */
+#define TIVA_CAN_TST_TX_MASK        0x00000060  /* Transmit Control     */
+#define TIVA_CAN_TST_TX_CANCTL      0x00000000  /* CAN Module Control   */
+#define TIVA_CAN_TST_TX_SAMPLE      0x00000020  /* Sample Point         */
+#define TIVA_CAN_TST_TX_DOMINANT    0x00000040  /* Driven Low           */
+#define TIVA_CAN_TST_TX_RECESSIVE   0x00000060  /* Driven High          */
+#define TIVA_CAN_TST_LBACK          0x00000010  /* Loopback Mode        */
+#define TIVA_CAN_TST_SILENT         0x00000008  /* Silent Mode          */
+#define TIVA_CAN_TST_BASIC          0x00000004  /* Basic Mode           */
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANBRPE register. *
+ ****************************************************************************/
+
+#define TIVA_CAN_BRPE_BRPE_MASK     0x0000000F  /* Baud Rate Prescaler Extension */
+#define TIVA_CAN_BRPE_BRPE_SHIFT    0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF1CRQ register.
+ * 
+ ****************************************************************************/
+#define TIVA_CAN_IF1CRQ_BUSY        0x00008000  /* Busy Flag        */
+#define TIVA_CAN_IF1CRQ_MNUM_MASK   0x0000003F  /* Message Number   */
+#define TIVA_CAN_IF1CRQ_MNUM_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF1CMSK register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF1CMSK_WRNRD      0x00000080  /* Write, Not Read              */
+#define TIVA_CAN_IF1CMSK_MASK       0x00000040  /* Access Mask Bits             */
+#define TIVA_CAN_IF1CMSK_ARB        0x00000020  /* Access Arbitration Bits      */
+#define TIVA_CAN_IF1CMSK_CONTROL    0x00000010  /* Access Control Bits          */
+#define TIVA_CAN_IF1CMSK_CLRINTPND  0x00000008  /* Clear Interrupt Pending Bit  */
+#define TIVA_CAN_IF1CMSK_NEWDAT     0x00000004  /* Access New Data              */
+#define TIVA_CAN_IF1CMSK_TXRQST     0x00000004  /* Access Transmission Request  */
+#define TIVA_CAN_IF1CMSK_DATAA      0x00000002  /* Access Data Byte 0 to 3      */
+#define TIVA_CAN_IF1CMSK_DATAB      0x00000001  /* Access Data Byte 4 to 7      */
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF1MSK1 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF1MSK1_IDMSK_MASK     0x0000FFFF  /* Identifier Mask */
+#define TIVA_CAN_IF1MSK1_IDMSK_SHIFT    0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF1MSK2 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF1MSK2_MXTD           0x00008000  /* Mask Extended Identifier */
+#define TIVA_CAN_IF1MSK2_MDIR           0x00004000  /* Mask Message Direction   */
+#define TIVA_CAN_IF1MSK2_IDMSK_MASK     0x00001FFF  /* Identifier Mask          */
+#define TIVA_CAN_IF1MSK2_IDMSK_SHIFT    0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF1ARB1 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF1ARB1_ID_MASK    0x0000FFFF  /* Message Identifier */
+#define TIVA_CAN_IF1ARB1_ID_SHIFT   0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF1ARB2 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF1ARB2_MSGVAL     0x00008000  /* Message Valid        */
+#define TIVA_CAN_IF1ARB2_XTD        0x00004000  /* Extended Identifier  */
+#define TIVA_CAN_IF1ARB2_DIR        0x00002000  /* Message Direction    */
+#define TIVA_CAN_IF1ARB2_ID_MASK    0x00001FFF  /* Message Identifier   */
+#define TIVA_CAN_IF1ARB2_ID_SHIFT   0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF1MCTL register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF1MCTL_NEWDAT     0x00008000  /* New Data                     */
+#define TIVA_CAN_IF1MCTL_MSGLST     0x00004000  /* Message Lost                 */
+#define TIVA_CAN_IF1MCTL_INTPND     0x00002000  /* Interrupt Pending            */
+#define TIVA_CAN_IF1MCTL_UMASK      0x00001000  /* Use Acceptance Mask          */
+#define TIVA_CAN_IF1MCTL_TXIE       0x00000800  /* Transmit Interrupt Enable    */
+#define TIVA_CAN_IF1MCTL_RXIE       0x00000400  /* Receive Interrupt Enable     */
+#define TIVA_CAN_IF1MCTL_RMTEN      0x00000200  /* Remote Enable                */
+#define TIVA_CAN_IF1MCTL_TXRQST     0x00000100  /* Transmit Request             */
+#define TIVA_CAN_IF1MCTL_EOB        0x00000080  /* End of Buffer                */
+#define TIVA_CAN_IF1MCTL_DLC_MASK   0x0000000F  /* Data Length Code             */
+#define TIVA_CAN_IF1MCTL_DLC_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF1DA1 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF1DA1_DATA_MASK   0x0000FFFF  /* Data */
+#define TIVA_CAN_IF1DA1_DATA_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF1DA2 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF1DA2_DATA_MASK   0x0000FFFF  /* Data */
+#define TIVA_CAN_IF1DA2_DATA_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF1DB1 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF1DB1_DATA_MASK   0x0000FFFF  /* Data */
+#define TIVA_CAN_IF1DB1_DATA_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF1DB2 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF1DB2_DATA_MASK   0x0000FFFF  /* Data */
+#define TIVA_CAN_IF1DB2_DATA_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF2CRQ register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF2CRQ_BUSY        0x00008000  /* Busy Flag        */
+#define TIVA_CAN_IF2CRQ_MNUM_MASK   0x0000003F  /* Message Number   */
+#define TIVA_CAN_IF2CRQ_MNUM_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF2CMSK register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF2CMSK_WRNRD      0x00000080  /* Write, Not Read              */
+#define TIVA_CAN_IF2CMSK_MASK       0x00000040  /* Access Mask Bits             */
+#define TIVA_CAN_IF2CMSK_ARB        0x00000020  /* Access Arbitration Bits      */
+#define TIVA_CAN_IF2CMSK_CONTROL    0x00000010  /* Access Control Bits          */
+#define TIVA_CAN_IF2CMSK_CLRINTPND  0x00000008  /* Clear Interrupt Pending Bit  */
+#define TIVA_CAN_IF2CMSK_NEWDAT     0x00000004  /* Access New Data              */
+#define TIVA_CAN_IF2CMSK_TXRQST     0x00000004  /* Access Transmission Request  */
+#define TIVA_CAN_IF2CMSK_DATAA      0x00000002  /* Access Data Byte 0 to 3      */
+#define TIVA_CAN_IF2CMSK_DATAB      0x00000001  /* Access Data Byte 4 to 7      */
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF2MSK1 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF2MSK1_IDMSK_MASK     0x0000FFFF  /* Identifier Mask */
+#define TIVA_CAN_IF2MSK1_IDMSK_SHIFT    0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF2MSK2 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF2MSK2_MXTD           0x00008000  /* Mask Extended Identifier */
+#define TIVA_CAN_IF2MSK2_MDIR           0x00004000  /* Mask Message Direction   */
+#define TIVA_CAN_IF2MSK2_IDMSK_MASK     0x00001FFF  /* Identifier Mask          */
+#define TIVA_CAN_IF2MSK2_IDMSK_SHIFT    0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF2ARB1 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF2ARB1_ID_MASK    0x0000FFFF  /* Message Identifier */
+#define TIVA_CAN_IF2ARB1_ID_SHIFT   0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF2ARB2 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF2ARB2_MSGVAL     0x00008000  /* Message Valid        */
+#define TIVA_CAN_IF2ARB2_XTD        0x00004000  /* Extended Identifier  */
+#define TIVA_CAN_IF2ARB2_DIR        0x00002000  /* Message Direction    */
+#define TIVA_CAN_IF2ARB2_ID_MASK    0x00001FFF  /* Message Identifier   */
+#define TIVA_CAN_IF2ARB2_ID_SHIFT   0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF2MCTL register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF2MCTL_NEWDAT     0x00008000  /* New Data                     */
+#define TIVA_CAN_IF2MCTL_MSGLST     0x00004000  /* Message Lost                 */
+#define TIVA_CAN_IF2MCTL_INTPND     0x00002000  /* Interrupt Pending            */
+#define TIVA_CAN_IF2MCTL_UMASK      0x00001000  /* Use Acceptance Mask          */
+#define TIVA_CAN_IF2MCTL_TXIE       0x00000800  /* Transmit Interrupt Enable    */
+#define TIVA_CAN_IF2MCTL_RXIE       0x00000400  /* Receive Interrupt Enable     */
+#define TIVA_CAN_IF2MCTL_RMTEN      0x00000200  /* Remote Enable                */
+#define TIVA_CAN_IF2MCTL_TXRQST     0x00000100  /* Transmit Request             */
+#define TIVA_CAN_IF2MCTL_EOB        0x00000080  /* End of Buffer                */
+#define TIVA_CAN_IF2MCTL_DLC_MASK   0x0000000F  /* Data Length Code             */
+#define TIVA_CAN_IF2MCTL_DLC_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF2DA1 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF2DA1_DATA_MASK   0x0000FFFF  /* Data */
+#define TIVA_CAN_IF2DA1_DATA_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF2DA2 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF2DA2_DATA_MASK   0x0000FFFF  /* Data */
+#define TIVA_CAN_IF2DA2_DATA_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF2DB1 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF2DB1_DATA_MASK   0x0000FFFF  /* Data */
+#define TIVA_CAN_IF2DB1_DATA_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANIF2DB2 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_IF2DB2_DATA_MASK   0x0000FFFF  /* Data */
+#define TIVA_CAN_IF2DB2_DATA_SHIFT  0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANTXRQ1 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_TXRQ1_TXRQST_MASK  0x0000FFFF  /* Transmission Request Bits */
+#define TIVA_CAN_TXRQ1_TXRQST_SHIFT 0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANTXRQ2 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_TXRQ2_TXRQST_MASK  0x0000FFFF  /* Transmission Request Bits */
+#define TIVA_CAN_TXRQ2_TXRQST_SHIFT 0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANNWDA1 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_NWDA1_NEWDAT_MASK  0x0000FFFF  /* New Data Bits */
+#define TIVA_CAN_NWDA1_NEWDAT_SHIFT 0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANNWDA2 register.
+ ****************************************************************************/
+
+#define TIVA_CAN_NWDA2_NEWDAT_MASK  0x0000FFFF  /* New Data Bits */
+#define TIVA_CAN_NWDA2_NEWDAT_SHIFT 0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANMSG1INT register.
+ ****************************************************************************/
+
+#define TIVA_CAN_MSG1INT_INTPND_MASK        0x0000FFFF  /* Interrupt Pending Bits */
+#define TIVA_CAN_MSG1INT_INTPND_SHIFT       0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANMSG2INT register.
+ ****************************************************************************/
+
+#define TIVA_CAN_MSG2INT_INTPND_MASK        0x0000FFFF  /* Interrupt Pending Bits */
+#define TIVA_CAN_MSG2INT_INTPND_SHIFT       0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANMSG1VAL register.
+ ****************************************************************************/
+
+#define TIVA_CAN_MSG1VAL_MSGVAL_MASK        0x0000FFFF  /* Message Valid Bits */
+#define TIVA_CAN_MSG1VAL_MSGVAL_SHIFT       0
+
+/****************************************************************************
+ * The following are defines for the bit fields in the CANMSG2VAL register.
+ ****************************************************************************/
+
+#define TIVA_CAN_MSG2VAL_MSGVAL_MASK        0x0000FFFF  /* Message Valid Bits */
+#define TIVA_CAN_MSG2VAL_MSGVAL_SHIFT       0
+
+/****************************************************************************
+ * Public Types
+ ****************************************************************************/
+
+/****************************************************************************
+ * Public Data
+ ****************************************************************************/
+
+/****************************************************************************
+ * Inline Functions
+ ****************************************************************************/
+
+/****************************************************************************
+ * Public Function Prototypes
+ ****************************************************************************/
+
+#endif /* __ARCH_ARM_SRC_TIVA_HARDWARE_TIVA_CAN_H */
