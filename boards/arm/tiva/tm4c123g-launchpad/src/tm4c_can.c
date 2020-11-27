@@ -75,45 +75,30 @@
 int tm4c_can_setup(void)
 {
 #ifdef CONFIG_TIVA_CAN
-  struct can_dev_s *can;
   int ret;
 
 #  ifdef CONFIG_TIVA_CAN0
-  /* Call tiva_can_initialize() to get an instance of CAN interface 0 */
+  /* Call tiva_can_initialize() to get an instance of CAN interface 0
+   * and register it.
+   */
   
-  can = tiva_can_initialize(0);
-  if (can == NULL)
-    {
-      canerr("ERROR:  Failed to get CAN interface 0\n");
-      return -ENODEV;
-    }
-
-  /* Register the CAN driver at "/dev/can0" */
-
-  ret = can_register("/dev/can0", can);
+  ret = tiva_can_initialize("/dev/can0", 0);
   if (ret < 0)
     {
-      canerr("ERROR: can_register failed: %d\n", ret);
+      canerr("ERROR:  Failed to get/register CAN interface 0\n");
       return ret;
     }
 #  endif /* CONFIG_TIVA_CAN0 */
 
 #  ifdef CONFIG_TIVA_CAN1
-  /* Call tiva_can_initialize() to get an instance of CAN interface 1 */
+  /* Call tiva_can_initialize() to get an instance of CAN interface 1
+   * and register it.
+   */
   
-  can = tiva_can_initialize(1);
-  if (can == NULL)
-    {
-      canerr("ERROR:  Failed to get CAN interface 1\n");
-      return -ENODEV;
-    }
-
-  /* Register the CAN driver at "/dev/can1" */
-
-  ret = can_register("/dev/can1", can);
+  ret = tiva_can_initialize("/dev/can1", 1);
   if (ret < 0)
     {
-      canerr("ERROR: can_register failed: %d\n", ret);
+      canerr("ERROR:  Failed to get/register CAN interface 1\n");
       return ret;
     }
 #  endif /* CONFIG_TIVA_CAN1 */

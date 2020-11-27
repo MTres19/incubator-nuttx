@@ -43,11 +43,22 @@
 #include <nuttx/config.h>
 #include <nuttx/can/can.h>
 
-#include "hardware/tiva_can.h"
-
 /****************************************************************************
  * Pre-processor Definitions
  ****************************************************************************/
+
+#if defined(CONFIG_CAN) && (defined(CONFIG_TIVA_CAN0) || defined(CONFIG_TIVA_CAN1))
+
+#ifndef __ASSEMBLY__
+
+#undef EXTERN
+#if defined(__cplusplus)
+#define EXTERN extern "C"
+extern "C"
+{
+#else
+#define EXTERN extern
+#endif
 
 /****************************************************************************
  * Public Types
@@ -65,6 +76,28 @@
  * Public Function Prototypes
  ****************************************************************************/
 
-FAR struct can_dev_s 
+/****************************************************************************
+ * Name: tiva_can_initialize
+ * 
+ * Description:
+ *   Initialize the selected CAN module
+ * 
+ * Input Parameters:
+ *   Device path, a string of the form "/dev/can0" or "/dev/can1"
+ *   Module number, for chips with multiple modules (typically 0 or 1)
+ * 
+ * Returned Value:
+ *   Pointer to can_dev_s (CAN device structure), or NULL on failure.
+ * 
+ ****************************************************************************/
 
+FAR struct can_dev_s *tiva_can_initialize(char *devpath, int modnum);
+
+#undef EXTERN
+#if defined(__cplusplus)
+}
+#endif
+
+#endif /* __ASSEMBLY__ */
+#endif /* CONFIG_CAN && (CONFIG_TIVA_CAN0 || CONFIG_TIVA_CAN1) */
 #endif /* __ARCH_ARM_SRC_TIVA_TIVA_CAN_H */
