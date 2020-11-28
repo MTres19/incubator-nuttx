@@ -49,7 +49,14 @@
  ****************************************************************************/
 
 /****************************************************************************
- * The following are defines for the CAN register offsets.                  *
+ * The following are defines describing the CAN controller modules
+ ****************************************************************************/
+
+#define TIVA_CAN_NUM_IFACES        2            /* Number of sets of CANIF registers */
+
+
+/****************************************************************************
+ * The following are defines for the CAN register offsets.
  ****************************************************************************/
 
 #define TIVA_CAN_OFFSET_CTL         0x00000000  /* CAN Control                  */
@@ -95,6 +102,86 @@
 
 #define TIVA_CAN_OFFSET_MSG1VAL     0x00000160  /* CAN Message 1 Valid          */
 #define TIVA_CAN_OFFSET_MSG2VAL     0x00000164  /* CAN Message 2 Valid          */
+
+/****************************************************************************
+ * The following are defines for CAN registers
+ ****************************************************************************/
+
+#define TIVA_CAN_BASE(n)      (TIVA_CAN0_BASE + (n)*0x1000)
+
+#define TIVA_CAN_CTL(n)       (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_CTL) /* CAN Control                  */
+#define TIVA_CAN_STS(n)       (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_STS) /* CAN Status                   */
+#define TIVA_CAN_ERR(n)       (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_ERR) /* CAN Error Counter            */
+#define TIVA_CAN_BIT(n)       (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_BIT) /* CAN Bit Timing               */
+#define TIVA_CAN_INT(n)       (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_INT) /* CAN Interrupt                */
+#define TIVA_CAN_TST(n)       (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_TST) /* CAN Test                     */
+#define TIVA_CAN_OFFSET_BRPE  (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_BRPE)/* CAN Baud Rate Prescaler      *
+                                                                      * Extension                    */
+
+#define TIVA_CAN_IF1CRQ(n)    (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1CRQ)   /* CAN IF1 Command Request      */
+#define TIVA_CAN_IF1CMSK(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1CMSK)  /* CAN IF1 Command Mask         */
+#define TIVA_CAN_IF1MSK1(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1MSK1)  /* CAN IF1 Mask 1               */
+#define TIVA_CAN_IF1MSK2(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1MSK2)  /* CAN IF1 Mask 2               */
+#define TIVA_CAN_IF1ARB1(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1ARB1)  /* CAN IF1 Arbitration 1        */
+#define TIVA_CAN_IF1ARB2(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1ARB2)  /* CAN IF1 Arbitration 2        */
+#define TIVA_CAN_IF1MCTL(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1MCTL)  /* CAN IF1 Message Control      */
+#define TIVA_CAN_IF1DA1(n)    (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1DA1)   /* CAN IF1 Data A1              */
+#define TIVA_CAN_IF1DA2(n)    (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1DA2)   /* CAN IF1 Data A2              */
+#define TIVA_CAN_IF1DB1(n)    (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1DB1)   /* CAN IF1 Data B1              */
+#define TIVA_CAN_IF1DB2(n)    (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1DB2)   /* CAN IF1 Data B2              */
+#define TIVA_CAN_IF2CRQ(n)    (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF2CRQ)   /* CAN IF2 Command Request      */
+#define TIVA_CAN_IF2CMSK(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF2CMSK)  /* CAN IF2 Command Mask         */
+#define TIVA_CAN_IF2MSK1(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF2MSK1)  /* CAN IF2 Mask 1               */
+#define TIVA_CAN_IF2MSK2(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF2MSK2)  /* CAN IF2 Mask 2               */
+#define TIVA_CAN_IF2ARB1(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF2ARB1)  /* CAN IF2 Arbitration 1        */
+#define TIVA_CAN_IF2ARB2(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF2ARB2)  /* CAN IF2 Arbitration 2        */
+#define TIVA_CAN_IF2MCTL(n)   (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF2MCTL)  /* CAN IF2 Message Control      */
+#define TIVA_CAN_IF2DA1(n)    (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF2DA1)   /* CAN IF2 Data A1              */
+#define TIVA_CAN_IF2DA2(n)    (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF2DA2)   /* CAN IF2 Data A2              */
+#define TIVA_CAN_IF2DB1(n)    (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF2DB1)   /* CAN IF2 Data B1              */
+#define TIVA_CAN_IF2DB2(n)    (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF2DB2)   /* CAN IF2 Data B2              */
+#define TIVA_CAN_TXRQ1(n)     (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_TXRQ1)    /* CAN Transmission Request 1   */
+#define TIVA_CAN_TXRQ2(n)     (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_TXRQ2)    /* CAN Transmission Request 2   */
+#define TIVA_CAN_NWDA1(n)     (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_NWDA1)    /* CAN New Data 1               */
+#define TIVA_CAN_NWDA2(n)     (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_NWDA2)    /* CAN New Data 2               */
+#define TIVA_CAN_OFFSET_MSG1INT (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_MSG1INT) /* CAN Message 1                *
+                                                                            * Interrupt Pending            */
+
+#define TIVA_CAN_OFFSET_MSG2INT (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_MSG2INT) /* CAN Message 2                *
+                                                                            * Interrupt Pending            */
+
+#define TIVA_CAN_MSG1VAL(n) (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_MSG1VAL) /* CAN Message 1 Valid          */
+#define TIVA_CAN_MSG2VAL(n) (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_MSG2VAL) /* CAN Message 2 Valid          */
+
+/****************************************************************************
+ * The following are defines for CAN interface (CANIFn) register offsets
+ ****************************************************************************/
+
+#define TIVA_CAN_IFACE_OFFSET(i) ((i) * 0x60)
+
+#define TIVA_CANIF_CRQ_OFFSET   0x00000000
+#define TIVA_CANIF_CMSK_OFFSET  0x00000004
+#define TIVA_CANIF_MSK1_OFFSET  0x00000008
+#define TIVA_CANIF_MSK2_OFFSET  0x0000000C
+#define TIVA_CANIF_ARB1_OFFSET  0x00000010
+#define TIVA_CANIF_ARB2_OFFSET  0x00000014
+#define TIVA_CANIF_MCTL_OFFSET  0x00000018
+#define TIVA_CANIF_DA1_OFFSET   0x0000001C
+#define TIVA_CANIF_DA2_OFFSET   0x00000020
+#define TIVA_CANIF_DB1_OFFSET   0x00000024
+#define TIVA_CANIF_DB2_OFFSET   0x00000028
+
+#define TIVA_CANIF_CRQ(n,i)   (TIVA_CAN_BASE(n)+TIVA_CAN_IFACE_OFFSET(i)+TIVA_CANIF_CRQ_OFFSET)
+#define TIVA_CANIF_CMSK(n,i)  (TIVA_CAN_BASE(n)+TIVA_CAN_IFACE_OFFSET(i)+TIVA_CANIF_CMSK_OFFSET)
+#define TIVA_CANIF_MSK1(n,i)  (TIVA_CAN_BASE(n)+TIVA_CAN_IFACE_OFFSET(i)+TIVA_CANIF_MSK1_OFFSET)
+#define TIVA_CANIF_MSK2(n,i)  (TIVA_CAN_BASE(n)+TIVA_CAN_IFACE_OFFSET(i)+TIVA_CANIF_MSK2_OFFSET)
+#define TIVA_CANIF_ARB1(n,i)  (TIVA_CAN_BASE(n)+TIVA_CAN_IFACE_OFFSET(i)+TIVA_CANIF_ARB1_OFFSET)
+#define TIVA_CANIF_ARB2(n,i)  (TIVA_CAN_BASE(n)+TIVA_CAN_IFACE_OFFSET(i)+TIVA_CANIF_ARB2_OFFSET)
+#define TIVA_CANIF_MCTL(n,i)  (TIVA_CAN_BASE(n)+TIVA_CAN_IFACE_OFFSET(i)+TIVA_CANIF_MCTL_OFFSET)
+#define TIVA_CANIF_DA1(n,i)   (TIVA_CAN_BASE(n)+TIVA_CAN_IFACE_OFFSET(i)+TIVA_CANIF_DA1_OFFSET)
+#define TIVA_CANIF_DA2(n,i)   (TIVA_CAN_BASE(n)+TIVA_CAN_IFACE_OFFSET(i)+TIVA_CANIF_DA2_OFFSET)
+#define TIVA_CANIF_DB1(n,i)   (TIVA_CAN_BASE(n)+TIVA_CAN_IFACE_OFFSET(i)+TIVA_CANIF_DB1_OFFSET)
+#define TIVA_CANIF_DB2(n,i)   (TIVA_CAN_BASE(n)+TIVA_CAN_IFACE_OFFSET(i)+TIVA_CANIF_DB2_OFFSET)
 
 /****************************************************************************
  * The following are defines for the bit fields in the CANCTL register.

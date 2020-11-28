@@ -55,6 +55,8 @@
 
 #include <nuttx/config.h>
 #include <nuttx/can/can.h>
+#include <nuttx/sempahore.h>
+#include <nuttx/mutex.h>
 
 #include "chip.h"
 #include "tiva_can.h"
@@ -70,12 +72,24 @@
  * Private Types
  ****************************************************************************/
 
+/* This structure represents a set of CAN interface registers that can be
+ * claimed by a thread */
+
+struct tiva_can_iface_s
+{
+  int       num;
+  bool      avail;
+};
+
 /* This structure represents a CAN module on the microcontroller */
 
 struct tiva_canmod_s
 {
   int       modnum;    /* Module number, mostly for syscon register fields */
   uint32_t  base;      /* Registers base address */
+  sem_t     iface_sem; /* Semaphore for queuing access to an interface */
+  mutex_t   iface_mtx; /* Mutex for actually claiming an interface */
+  struct tiva_can_iface_s *ifaces; /* Array of interfaces */
 };
 
 /* This structure represents the CAN bit timing parameters */
@@ -87,6 +101,20 @@ struct tiva_cantiming_s
   int       tseg2;
   int       sjw;
 };
+
+/* This structure mirrors the CANIFnCRQ and CANIFnCMSK registers. */
+
+struct tiva_can_readcmd_s
+{
+  int   msg_num;
+  bool  read_mask;
+  bool  read_arb;
+  bool  read_ctl;
+  bool  read_data;
+  bool  clr_intpnd;
+  bool  clr_newdat;
+}
+  
 
 /****************************************************************************
  * Private Function Prototypes
@@ -115,6 +143,8 @@ static void tivacan_initmode_ctl(bool enable);
 static struct tiva_cantiming_s tivacan_bittiming_get(FAR struct can_dev_s *dev);
 static void tivacan_bittiming_set(FAR struct tiva_cantiming_s *timing,
                                   FAR struct can_dev_s *dev);
+static struct tiva_can_iface_s *tivacan_claim_iface(FAR struct can_dev_s *dev);
+static void tivacan_release_iface(FAR struct can_dev_s *dev, int num);
 
 /****************************************************************************
  * Private Data
@@ -137,10 +167,29 @@ static const struct can_ops_s g_tivacanops
 };
 
 #ifdef CONFIG_TIVA_CAN0
+
+static struct tiva_can_iface_s g_tivacan0ifaces[] = {
+#  if TIVA_CAN_NUM_IFACES >= 1
+  struct tiva_can_iface_s {
+    .num = 0;
+    .avail  = true;
+  },
+#  endif
+#  if TIVA_CAN_NUM_IFACES >= 2
+  struct tiva_can_iface_s {
+    .num = 1;
+    .avail = true;
+  }
+#  else
+#    error "Number of CAN interfaces out of range"
+#  endif
+};
+
 static struct tiva_canmod_s g_tivacan0priv
 {
   .modnum           = 0;
   .base             = TIVA_CAN0_BASE;
+  .ifaces           = g_tivacan0ifaces;
 };
 
 static struct can_dev_s g_tivacan0dev
@@ -151,10 +200,29 @@ static struct can_dev_s g_tivacan0dev
 #endif
 
 #ifdef CONFIG_TIVA_CAN1
+
+static struct tiva_can_iface_s g_tivacan1ifaces[] = {
+#  if TIVA_CAN_NUM_IFACES >= 1
+  struct tiva_can_iface_s {
+    .num = 0;
+    .avail  = true;
+  },
+#  endif
+#  if TIVA_CAN_NUM_IFACES >= 2
+  struct tiva_can_iface_s {
+    .num = 1;
+    .avail = true;
+  }
+#  else
+#    error "Number of CAN interfaces out of range"
+#  endif
+};
+
 static struct tiva_canmod_s g_tivacan1priv
 {
   .modnum           = 1;
   .base             = TIVA_CAN1_BASE;
+  .ifaces           = tivacan1ifaces;
 };
 
 static struct can_dev_s g_tivacan1dev
@@ -486,6 +554,9 @@ static void tivacan_unified_isr(FAR struct can_dev_s *dev)
  *   
  *   This is a driver-internal utility function.
  * 
+ * Input parameters:
+ *   dev - An instance of the "upper half" CAN driver structure
+ * 
  * Returned value:
  *   struct tiva_cantiming_s containing the four parameters listed above.
  ****************************************************************************/
@@ -520,6 +591,11 @@ static struct tiva_cantiming_s tivacan_bittiming_get(FAR struct can_dev_s *dev)
  *   the registers (which are off by one).
  *   
  *   This is a driver-internal utility function.
+ * 
+ * Input parameters:
+ *   timing - An instance of tiva_cantiming_s, with the prescaler, TSEG1,
+ *            TSEG2, and SJW set to their real (not off-by-one) values.
+ *   dev - An instance of the "upper half" CAN driver structure
  * 
  * Returned value: None
  ****************************************************************************/
@@ -569,6 +645,57 @@ static void tivacan_bittiming_set(FAR struct tiva_cantiming_s *timing,
   modifyreg32(dev->cd_priv + TIVA_CAN_OFFSET_CTL, TIVA_CAN_CTL_CCE, 0);
   
   leave_critical_section(flags);
+}
+
+/****************************************************************************
+ * Name: tivacan_claim_iface
+ * 
+ * Description:
+ *   Claim exclusive access to a set of CANIF registers
+ * 
+ * Input parameters:
+ *   dev - An instance of the "upper half" CAN driver structure
+ * 
+ * Return value:
+ *   A pointer to a tiva_can_iface_s that is guaranteed to be free, NULL on
+ *   failure.
+ ****************************************************************************/
+static struct tiva_can_iface_s *tivacan_claim_iface(FAR struct can_dev_s *dev)
+{
+  struct tiva_can_iface_s *iface;
+  
+  nxsem_wait(dev->cd_priv->iface_sem);
+  nxmutex_lock(dev->cd_priv->iface_mtx);
+  
+  for (int i = 0; i < TIVA_CAN_NUM_IFACES; ++i)
+    {
+      if (can_dev_s->cd_priv->ifaces[i].avail)
+        {
+          can_dev_s->cd_priv->ifaces[i].avail = false;
+          nxmutex_unlock(dev->cd_priv_iface_mtx);
+          return &can_dev_s->cd_priv->ifaces[i];
+        }
+    }
+    return NULL;
+}
+
+/****************************************************************************
+ * Name: tivacan_release_iface
+ * 
+ * Description:
+ *   Release a set of CANIF registers for another thread to use
+ * 
+ * Input parameters:
+ *   dev - An instance of the "upper half" CAN driver structure
+ *   num - The interface number, from tiva_can_iface_s.num
+ ****************************************************************************/
+
+static void tivacan_release_iface(FAR struct can_dev_s *dev, int num)
+{
+  nxmutex_lock(dev->cd_priv->iface_mtx);
+  dev->cd_priv->ifaces[num].avail = true;
+  nxmutex_unlock(dev->cd_priv->iface_mtx);
+  nxsem_post(dev->cd_priv->iface_sem);
 }
 
 /****************************************************************************
@@ -645,7 +772,21 @@ int tiva_can_initialize(FAR char *devpath, int modnum)
         }
     }
 #endif
-
+  
+  /* Initialize concurrancy objects for accessing interfaces */
+  ret = nxsem_init(&dev->cd_priv->iface_sem, 0, TIVA_CAN_NUM_IFACES);
+  if (ret < 0)
+    {
+      canerr("ERROR: failed to initialize semaphore: %d\n", ret);
+      return ret;
+    }
+  
+  ret = nxmutex_init(&dev->cd_priv->iface_mtx);
+  if (ret < 0)
+    {
+      canerr("ERROR: failed to initialize mutex: %d\n", ret);
+    }
+  
   ret = can_register(devpath, dev);
   if (ret < 0)
     {
