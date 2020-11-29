@@ -358,6 +358,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
     {
       tivacan_disable_msg_obj(dev, iface, i);
     }
+  tivacan_release_iface(dev, iface->num);
   
   /* Register the ISR */
   switch (dev->cd_priv->modnum)
