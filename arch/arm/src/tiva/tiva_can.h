@@ -49,6 +49,76 @@
 
 #if defined(CONFIG_CAN) && (defined(CONFIG_TIVA_CAN0) || defined(CONFIG_TIVA_CAN1))
 
+/* Tiva-specific Ioctl Commands *********************************************
+ * 
+ * CANIOC_TIVA_ARE_THE_FIFOS_SHARED
+ *   Description:     Query whether TX and RX FIFOs share the same memory area
+ *   Argument:        Not used
+ *   Returned value:  Boolean, true if FIFOs are shared, false otherwise.
+ * 
+ * CANIOC_TIVA_RXFILTER_FIFO_MAXDEPTH_GET
+ *   Description:     Returns the maximum size of the filter's RX FIFO
+ *                    (not the actual size of the FIFO). For Tiva CAN
+ *                    modules, this is based on the number of message
+ *                    objects allocated to the TX FIFO and the other RX
+ *                    filter FIFOs.
+ *   Argument:        The filter ID returned by CANIOC_ADD_STDFILTER or
+ *                    CANIOC_ADD_EXTFILTER
+ *   Returned value:  The filter's maximum possible filter depth, based
+ *                    on the size of the TX FIFO and the other RX filter
+ *                    FIFOs.
+ * 
+ * CANIOC_TIVA_RXFILTER_FIFO_DEPTH_GET
+ *   Description:     Returns the current size of the filter's RX FIFO.
+ *   Argument:        The filter ID returned by CANIOC_ADD_STDFILTER or
+ *                    CANIOC_ADD_EXTFILTER
+ *   Returned value:  The filter's FIFO depth, i.e. the number of messages
+ *                    it can store.
+ * 
+ * CANIOC_TIVA_RXFILTER_FIFO_DEPTH_SET
+ *   Description:     Set the FIFO depth for an RX filter.
+ *   Argument:        The filter ID returned by CANIOC_ADD_STDFILTER or
+ *                    CANIOC_ADD_EXTFILTER, with the requested FIFO depth
+ *                    shifted left by 16 bits and ORed with filter ID.
+ *   Returned value:  Zero on success, a negated errno on failure.
+ * 
+ * CANIOC_TIVA_TXFIFO_MAX_DEPTH_GET
+ *   Description:     Returns the maximum size of the hardware TX FIFO
+ *                    (not the actual size of the FIFO). For Tiva CAN modules,
+ *                    this is based on the number of message objects allocated
+ *                    to RX filter FIFOs.
+ *   Argument:        Not used
+ *   Returned value:  The TX FIFO's maximum size, i.e. the maximum number of
+ *                    messages that can be queued for transmission in hardware.
+ * 
+ * CANIOC_TIVA_TXFIFO_DEPTH_GET
+ *   Description:     Returns the current size of the TX FIFO.
+ *   Argument:        Not used
+ *   Returned value:  The current depth of the TX FIFO, i.e. the number of
+ *                    messages that can be queued for transmission in hardware.
+ * 
+ * CANIOC_TIVA_TXFIFO_DEPTH_SET
+ *   Description:     Set the depth of the hardware TX FIFO.
+ *   Argument:        The requested TX FIFO depth
+ *   Returned value:  Zero on success, a negated errno on failure.
+ * 
+ * CANIOC_TIVA_ENQUEUE_RTR_MESSAGE
+ *   TODO
+ */
+
+#define CAN_TIVA_FIRST (CAN_FIRST + CAN_NCMDS)
+#define CAN_TIVA_NCMDS 8
+
+#define CANIOC_TIVA_ARE_THE_FIFOS_SHARED        _CANIOC(CAN_TIVA_FIRST + 0)
+#define CANIOC_TIVA_RXFIFO_MAX_DEPTH_GET        _CANIOC(CAN_TIVA_FIRST + 1)
+#define CANIOC_TIVA_RXFILTER_FIFO_MAXDEPTH_GET  _CANIOC(CAN_TIVA_FIRST + 2)
+#define CANIOC_TIVA_RXFILTER_FIFO_DEPTH_GET     _CANIOC(CAN_TIVA_FIRST + 3)
+#define CANIOC_TIVA_RXFILTER_FIFO_DEPTH_SET     _CANIOC(CAN_TIVA_FIRST + 4)
+#define CANIOC_TIVA_TXFIFO_MAX_DEPTH_GET        _CANIOC(CAN_TIVA_FIRST + 5)
+#define CANIOC_TIVA_TXFIFO_DEPTH_GET            _CANIOC(CAN_TIVA_FIRST + 6)
+#define CANIOC_TIVA_TXFIFO_DEPTH_SET            _CANIOC(CAN_TIVA_FIRST + 7)
+#define CANIOC_TIVA_ENQUEUE_RTR_MESSAGE         _CANIOC(CAN_TIVA_FIRST + 8)
+
 #ifndef __ASSEMBLY__
 
 #undef EXTERN

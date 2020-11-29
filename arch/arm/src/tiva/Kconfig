@@ -428,6 +428,7 @@ config TIVA_HAVE_ADC1
 config TIVA_CAN
 	bool
 	default n
+	select CAN_TXREADY
 
 config TIVA_HAVE_CAN0
 	bool
@@ -1499,6 +1500,24 @@ config TIVA_CAN_REGDEBUG
 	---help---
 		Output detailed register-level CAN device debug information.
 		Requires also CONFIG_DEBUG_CAN_INFO.
+
+config TIVA_CAN_FILTERS_MAX
+	int "Maximum number of CAN RX filters"
+	depends on TIVA_CAN0
+	range 1 31
+	default 8
+	---help---
+		This number applies to both CAN0 and CAN1, if the chip has
+		both. (This is the number of filters for each module, not the
+		total for both CAN modules.)
+		The Tiva CAN modules have 32 message objects. Assuming only
+		one is used for TX, it is possible to have up to 31 unique
+		RX filters. However, increasing the FIFO depth of a filter
+		uses up message objects and reduces this number. Additionally,
+		since the driver has to keep track of the message objects
+		assigned to each filter, increasing the number of available
+		filters increases the memory footprint even if the filters
+		are not used (internally, it is a statically-allocated array).
 
 endmenu
 
