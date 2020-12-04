@@ -54,6 +54,10 @@
 
 #define TIVA_CAN_NUM_IFACES        2            /* Number of sets of CANIF registers */
 
+/* Note: driver code uses a 32-bit bitmask to represent the message objects */
+
+#define TIVA_CAN_NUM_MSG_OBJS      32           /* Number of slots in the message SRAM */
+
 
 /****************************************************************************
  * The following are defines for the CAN register offsets.
@@ -160,32 +164,32 @@
  * Note that in these defines, the CAN interfaces are indexed from zero.
  ****************************************************************************/
 
-#define TIVA_CANIF_CRQ_OFFSET   0x00000000
-#define TIVA_CANIF_CMSK_OFFSET  0x00000004
-#define TIVA_CANIF_MSK1_OFFSET  0x00000008
-#define TIVA_CANIF_MSK2_OFFSET  0x0000000C
-#define TIVA_CANIF_ARB1_OFFSET  0x00000010
-#define TIVA_CANIF_ARB2_OFFSET  0x00000014
-#define TIVA_CANIF_MCTL_OFFSET  0x00000018
-#define TIVA_CANIF_DA1_OFFSET   0x0000001C
-#define TIVA_CANIF_DA2_OFFSET   0x00000020
-#define TIVA_CANIF_DB1_OFFSET   0x00000024
-#define TIVA_CANIF_DB2_OFFSET   0x00000028
+#define TIVA_CANIF_OFFSET_CRQ   0x00000000
+#define TIVA_CANIF_OFFSET_CMSK  0x00000004
+#define TIVA_CANIF_OFFSET_MSK1  0x00000008
+#define TIVA_CANIF_OFFSET_MSK2  0x0000000C
+#define TIVA_CANIF_OFFSET_ARB1  0x00000010
+#define TIVA_CANIF_OFFSET_ARB2  0x00000014
+#define TIVA_CANIF_OFFSET_MCTL  0x00000018
+#define TIVA_CANIF_OFFSET_DA1   0x0000001C
+#define TIVA_CANIF_OFFSET_DA2   0x00000020
+#define TIVA_CANIF_OFFSET_DB1   0x00000024
+#define TIVA_CANIF_OFFSET_DB2   0x00000028
 
 #define TIVA_CAN_OFFSET_IFACE(i) (TIVA_CAN_OFFSET_IFACE1_BASE + (i) * 0x60)
 #define TIVA_CAN_IFACE_BASE(n,i) (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IFACE(i))
 
-#define TIVA_CANIF_CRQ(n,i)   (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_CRQ_OFFSET)
-#define TIVA_CANIF_CMSK(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_CMSK_OFFSET)
-#define TIVA_CANIF_MSK1(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_MSK1_OFFSET)
-#define TIVA_CANIF_MSK2(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_MSK2_OFFSET)
-#define TIVA_CANIF_ARB1(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_ARB1_OFFSET)
-#define TIVA_CANIF_ARB2(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_ARB2_OFFSET)
-#define TIVA_CANIF_MCTL(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_MCTL_OFFSET)
-#define TIVA_CANIF_DA1(n,i)   (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_DA1_OFFSET)
-#define TIVA_CANIF_DA2(n,i)   (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_DA2_OFFSET)
-#define TIVA_CANIF_DB1(n,i)   (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_DB1_OFFSET)
-#define TIVA_CANIF_DB2(n,i)   (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_DB2_OFFSET)
+#define TIVA_CANIF_CRQ(n,i)   (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_OFFSET_CRQ)
+#define TIVA_CANIF_CMSK(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_OFFSET_CMSK)
+#define TIVA_CANIF_MSK1(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_OFFSET_MSK1)
+#define TIVA_CANIF_MSK2(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_OFFSET_MSK2)
+#define TIVA_CANIF_ARB1(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_OFFSET_ARB1)
+#define TIVA_CANIF_ARB2(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_OFFSET_ARB2)
+#define TIVA_CANIF_MCTL(n,i)  (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_OFFSET_MCTL)
+#define TIVA_CANIF_DA1(n,i)   (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_OFFSET_DA1)
+#define TIVA_CANIF_DA2(n,i)   (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_OFFSET_DA2)
+#define TIVA_CANIF_DB1(n,i)   (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_OFFSET_DB1)
+#define TIVA_CANIF_DB2(n,i)   (TIVA_CAN_IFACE_BASE((n),(i))+TIVA_CANIF_OFFSET_DB2)
 
 /****************************************************************************
  * The following are defines for the bit fields in the CANCTL register.

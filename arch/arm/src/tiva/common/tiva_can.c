@@ -86,7 +86,13 @@ struct tiva_can_iface_s
 
 struct tiva_can_fifo_s
 {
-  /* Bitfield representing the message objects belonging to this FIFO */
+  /* Bitfield representing the message objects belonging to this FIFO. The
+   * high bit (mask: 1 << 31) corresponds to message object 31, the low bit
+   * (mask: 1 << 0) corresponds to message object 0.
+   * 
+   * TODO: If a new chip came along with more message objects, this would
+   * need to be reworked.
+   */
   uint32_t  msg_nums;
 
   /* Filter assigned to this FIFO. Not used if this is the TX FIFO */
@@ -166,7 +172,7 @@ static void tivacan_bittiming_set(FAR struct tiva_can_timing_s *timing,
                                   FAR struct can_dev_s *dev);
 
 static struct tiva_can_iface_s *tivacan_claim_iface(FAR struct can_dev_s *dev);
-static void tivacan_release_iface(FAR struct can_dev_s *dev, int num);
+static void tivacan_release_iface(FAR struct can_dev_s *dev, FAR struct tivacan_iface_s *iface);
 
 static struct tiva_can_fifo_s  *tivacan_claim_fifo(FAR struct can_dev_s *dev,
                                                     int depth);
@@ -212,7 +218,8 @@ static struct tiva_can_iface_s g_tivacan0ifaces[] = {
     .avail  = true;
     .base   = TIVA_CAN_IFACE_BASE(0, 1);
   }
-#  else
+#  endif
+#  if TIVA_CAN_NUM_IFACES >= 3
 #    error "Number of CAN interfaces out of range"
 #  endif
 };
@@ -247,7 +254,8 @@ static struct tiva_can_iface_s g_tivacan1ifaces[] = {
     .avail = true;
     .base  = TIVA_CAN_IFACE_BASE(1,1);
   }
-#  else
+#  endif
+#  if TIVA_CAN_NUM_IFACES >= 3
 #    error "Number of CAN interfaces out of range"
 #  endif
 };
@@ -358,7 +366,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
     {
       tivacan_disable_msg_obj(dev, iface, i);
     }
-  tivacan_release_iface(dev, iface->num);
+  tivacan_release_iface(dev, iface);
   
   /* Register the ISR */
   switch (dev->cd_priv->modnum)
@@ -448,7 +456,7 @@ static void tivacan_shutdown(FAR struct can_dev_s *dev)
 
 static void tivacan_rxintctl(FAR struct can_dev_s *dev, bool enable)
 {
-  
+  modifyreg32(dev->base + TIVA_CAN_OFFSET_CTL
 }
 
 /****************************************************************************
@@ -631,6 +639,13 @@ static struct tiva_can_timing_s tivacan_bittiming_get(FAR struct can_dev_s *dev)
   timing.tseg2 = (canbit & TIVA_CAN_BIT_TSEG2_MASK) >> TIVA_CAN_BIT_TSEG2_SHIFT;
   timing.sjw   = (canbit & TIVA_CAN_BIT_SJW_MASK) >> TIVA_CAN_BIT_SJW_SHIFT;
   
+  /* Values stored in registers are 1 less than the values used */
+  
+  ++timing.prescaler;
+  ++timing.tseg1;
+  ++timing.tseg2;
+  ++timing.sjw;
+  
   return timing;
 }
 
@@ -679,7 +694,9 @@ static void tivacan_bittiming_set(FAR struct tiva_can_timing_s *timing,
   /* Enable writes to CANBIT and BRPE (set Configuration Change Enable) */
   modifyreg32(dev->cd_priv->base + TIVA_CAN_OFFSET_CTL, 0, TIVA_CAN_CTL_CCE);
   
-  /* Masking bits that belong in the baud rate prescaler extension register */
+  /* Masking bits that belong in the baud rate prescaler extension register.
+   * Values stored in registers are 1 less than the value used.
+   */
   
   canbit |= ((timing->prescaler - 1) << TIVA_CAN_BIT_BRP_SHIFT)
               & TIVA_CAN_BIT_BRP_MASK;
@@ -728,6 +745,9 @@ static struct tiva_can_iface_s *tivacan_claim_iface(FAR struct can_dev_s *dev)
           return &can_dev_s->cd_priv->ifaces[i];
         }
     }
+    
+    canerr("ERROR: Semaphore posted but no CAN interfaces available to claim!\n");
+    nxmutex_unlock(&dev->cd_priv->iface_mtx);
     return NULL;
 }
 
@@ -739,17 +759,25 @@ static struct tiva_can_iface_s *tivacan_claim_iface(FAR struct can_dev_s *dev)
  * 
  * Input parameters:
  *   dev - An instance of the "upper half" CAN driver structure
- *   num - The interface number, from tiva_can_iface_s.num
+ *   iface - The interface to release
  * 
  * Return value: None
  ****************************************************************************/
 
-static void tivacan_release_iface(FAR struct can_dev_s *dev, int num)
+static void tivacan_release_iface(FAR struct can_dev_s *dev,
+                                  FAR struct tiva_can_iface_s* iface)
 {
-  nxmutex_lock(&dev->cd_priv->iface_mtx);
-  dev->cd_priv->ifaces[num].avail = true;
-  nxmutex_unlock(&dev->cd_priv->iface_mtx);
-  nxsem_post(dev->cd_priv->iface_sem);
+  if (iface->avail == false)
+    {
+      nxmutex_lock(&dev->cd_priv->iface_mtx);
+      iface->avail = true;
+      nxmutex_unlock(&dev->cd_priv->iface_mtx);
+      nxsem_post(dev->cd_priv->iface_sem);
+    }
+  else
+    {
+      canerr("ERROR: Tried to release CAN interface that was already available!\n");
+    }
 }
 
 /****************************************************************************
@@ -764,8 +792,10 @@ static void tivacan_release_iface(FAR struct can_dev_s *dev, int num)
  *   depth - The desired FIFO depth to allocate
  * 
  * Return value: A pointer to tiva_can_fifo_s, which contains a bit-field
- *               of the message objects that may be used.
+ *               of the message objects that may be used, or NULL if there
+ *               is not enough room in the CAN module SRAM.
  ****************************************************************************/
+
 static struct tiva_can_fifo_s  *tivacan_alloc_fifo(FAR struct can_dev_s *dev,
                                                     int depth)
 {
@@ -791,7 +821,7 @@ static struct tiva_can_fifo_s  *tivacan_alloc_fifo(FAR struct can_dev_s *dev,
   /* Message objects that can be allocated to this FIFO */
   claimed = ~claimed;
   
-  for (i = 31; i > 0 && numclaimed < depth; --i) /* TODO remove hardcoded 31 */
+  for (i = 0; i < TIVA_CAN_NUM_MSG_OBJS && numclaimed < depth; ++i)
     {
       if (claimed & 1 << i)
         {
@@ -806,8 +836,11 @@ static struct tiva_can_fifo_s  *tivacan_alloc_fifo(FAR struct can_dev_s *dev,
     }
   else
     {
-      /* Clear the bits for message objects we don't need to claim right now */
-      claimed &= 0xffffffff >> i;
+      /* Clear the bits for message objects we don't need to claim right now.
+       * TODO: If a new chip came along with more than 32 message objects,
+       *       this would need to be reworked.
+       */
+      claimed &= 0xffffffff >> (31 - i);
       dev->cd_priv->fifos[free_fifo_idx].msg_nums;
       
       nxmutex_unlock(&dev->cd_priv->fifo_mtx);
@@ -876,17 +909,20 @@ static void tivacan_disable_msg_obj(FAR struct tiva_can_iface_s *iface,
   uint32_t reg;
   
   /* Signal a write (WRNRD) to the message SRAM touching the ARB registers */
-  reg = getreg32(iface->base + TIVA_CANIF_CMSK_OFFSET);
+  reg = getreg32(iface->base + TIVA_CANIF_OFFSET_CMSK);
   reg |= TIVA_CANIF_CMSK_WRNRD | TIVA_CANIF_CMSK_ARB;
-  putreg32(reg, iface->base + TIVA_CANIF_CMSK_OFFSET);
+  putreg32(reg, iface->base + TIVA_CANIF_OFFSET_CMSK);
   
   /* Mark message object as invalid */
-  reg = getreg32(iface->base + TIVA_CANIF_ARB2_OFFSET);
+  reg = getreg32(iface->base + TIVA_CANIF_OFFSET_ARB2);
   reg &= ~(TIVA_CANIF_ARB2_MSGVAL);
-  putreg32(reg, iface->base + TIVA_CANIF_ARB2_OFFSET);
+  putreg32(reg, iface->base + TIVA_CANIF_OFFSET_ARB2);
+  
+  /* Make sure the interface is not busy */
+  while (getreg32(iface->base + TIVA_CANIF_OFFSET_CRQ) & TIVA_CANIF_CRQ_BUSY);
   
   /* Submit request */
-  putreg32(num, iface->base + TIVA_CANIF_CRQ_OFFSET);
+  putreg32(num, iface->base + TIVA_CANIF_OFFSET_CRQ);
 }
 
 /****************************************************************************
