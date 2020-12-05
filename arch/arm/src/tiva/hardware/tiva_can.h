@@ -330,18 +330,22 @@
  * The following are defines for the bit fields in the CANIF1ARB1 register.
  ****************************************************************************/
 
-#define TIVA_CANIF_ARB1_ID_MASK     0x0000FFFF  /* Message Identifier */
-#define TIVA_CANIF_ARB1_ID_SHIFT    0
+#define TIVA_CANIF_ARB1_ID_EXT_MASK     0x0000FFFF  /* Identifier for lower 16 bits of extended ID */
+#define TIVA_CANIF_ARB1_ID_EXT_SHIFT    0
 
 /****************************************************************************
  * The following are defines for the bit fields in the CANIF1ARB2 register.
  ****************************************************************************/
 
-#define TIVA_CANIF_ARB2_MSGVAL      0x00008000  /* Message Valid        */
-#define TIVA_CANIF_ARB2_XTD         0x00004000  /* Extended Identifier  */
-#define TIVA_CANIF_ARB2_DIR         0x00002000  /* Message Direction    */
-#define TIVA_CANIF_ARB2_ID_MASK     0x00001FFF  /* Message Identifier   */
-#define TIVA_CANIF_ARB2_ID_SHIFT    0
+#define TIVA_CANIF_ARB2_MSGVAL          0x00008000  /* Message Valid        */
+#define TIVA_CANIF_ARB2_XTD             0x00004000  /* Extended Identifier  */
+#define TIVA_CANIF_ARB2_DIR             0x00002000  /* Message Direction    */
+#define TIVA_CANIF_ARB2_ID_EXT_MASK     0x00001FFF  /* Message Identifier   */
+#define TIVA_CANIF_ARB2_ID_EXT_SHIFT    0           /* Shift LEFT by this number to place a value in this filed */
+#define TIVA_CANIF_ARB2_ID_EXT_PRESHIFT 16          /* Shift RIGHT by this number to get the chunk this register wants */
+
+#define TIVA_CANIF_ARB2_ID_STD_MASK     0x00001FFA  /* ARB2 contains all 11 bits of a standard ID, but not aligned with 0 */
+#define TIVA_CANIF_ARB2_ID_STD_SHIFT    2           /* Shift LEFT by this number to place a value in this field */
 
 /****************************************************************************
  * The following are defines for the bit fields in the CANIF1MCTL register.

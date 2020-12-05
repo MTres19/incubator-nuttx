@@ -367,6 +367,13 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
   uint32_t  irq;
   int       ret;
   struct tivacan_iface_s *iface;
+  struct canioc_extfilter_s default_filter
+  {
+    .xf_id1   = 0x1234;
+    .xf_id2   = 0;
+    .xf_type  = CAN_FILTER_MASK;
+    .xf_prio  = CAN_MSGPRIO_HIGH;
+  };
   
   /* TODO: This does not belong here, different boards could have different
    * crystals!
@@ -389,8 +396,6 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
     {
       tivacan_disable_msg_obj(dev, iface, i);
     }
-  
-  tivacan_release_iface(dev, iface);
   
   /* Register the ISR */
   switch (dev->cd_priv->modnum)
@@ -433,6 +438,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
   
   /* TODO: Check return values */
   
+  tivacan_initfilter_ext(dev, iface, dev->cd_priv->rxdefault_fifo, &default_filter);
   
   
   return OK;
@@ -1042,12 +1048,13 @@ static int  tivacan_initfilter_std(FAR struct can_dev_s          *dev
                                    FAR struct tiva_can_fifo_s    *fifo,
                                    FAR struct canioc_stdfilter_s *filter)
 {
-  uint32_t reg;
-  uint32_t msgval; /* Message valid bitfield */
-  uint32_t newdat; /* New data bitfield (for RX message objects) */
-  uint32_t txrq;   /* Pending transmission bitfield */
+  uint32_t  reg;
+  uint32_t  msgval;  /* Message valid bitfield */
+  uint32_t  newdat;  /* New data bitfield (for RX message objects) */
+  uint32_t  txrq;    /* Pending transmission bitfield */
+  bool      eob_set = false; /* Whether the End of Buffer bit has been set yet */
   
-  for (int i = 0; i < TIVA_CAN_NUM_MSG_OBJS; ++i)
+  for (int i = TIVA_CAN_NUM_MSG_OBJS - 1; i >= 0; ++i)
   {
     if (fifo->msg_nums & (1 << i))
     {
@@ -1077,21 +1084,43 @@ static int  tivacan_initfilter_std(FAR struct can_dev_s          *dev
       putreg32(reg, iface->base + TIVA_CANIF_OFFSET_CMSK);
       
       /* Mask 2 Register
-       * Filter out extended messages and remote request frames.
-       * The Tiva CAN module does not provide a mechanism for reading the RTR
-       * bit of the CAN message. Instead, it is inferred from the filtering
-       * parameters. 
+       * Filter out extended messages, but allow remote request frames through.
+       * This is done by disabling filter-on-direction (MDIR = 0), but setting
+       * the DIR bit in the ARB2 register to 1 (TX).
        */
       reg = TIVA_CANIF_MSK2_MXTD;
       reg |= filter->sf_id2 << TIVA_CANIF_MSK2_IDMSK_STD_SHIFT;
       putreg32(reg, iface->base + TIVA_CANIF_OFFSET_MSK2);
       
       /* Arbitration 2 Register
-       * Mark the message object as valid. Do not enable extended IDs. 
-      reg = TIVA_CANIF_ARB2_MSGVAL |
+       * Mark the message object as valid. Set the DIR bit to allow remote frames.
+       */
+      reg = TIVA_CANIF_ARB2_MSGVAL | TIVA_CANIF_ARB2_DIR;
+      reg |= filter->sf_id1 << TIVA_CANIF_ARB2_ID_STD_SHIFT;
+      putreg32(reg, iface->base + TIVA_CANIF_OFFSET_ARB2);
+      
+      /* Message Control Register
+       * Use acceptance filter masks, enable RX interrupts for this message
+       * object. DLC is initialized to zero but updated by received frames.
+       */
+      reg = TIVA_CANIF_MCTL_UMASK | TIVA_CANIF_MCTL_RXIE;
+      if (!eob_set)
+        {
+          reg |= TIVA_CANIF_MCTL_EOB;
+          eob_set = true;
+        }
+      
+      putreg32(reg, iface->base + TIVA_CANIF_OFFSET_MCTL);
+      
+      /* Request the registers be transferred to the message RAM and wait
+       * for the transfer to complete.
+       */
+      putreg32(i, iface->base + TIVA_CANIF_OFFSET_CRQ);
+      while (getreg32(iface->base + TIVA_CANIF_OFFSET_CRQ) & TIVA_CANIF_CRQ_BUSY);
     }
   }
   
+  return OK;
 }
 
 /****************************************************************************
@@ -1124,7 +1153,84 @@ static int  tivacan_initfilter_ext(FAR struct can_dev_s          *dev,
                                    FAR struct canioc_extfilter_s *filter)
 {
   
+  uint32_t  reg;
+  uint32_t  msgval;  /* Message valid bitfield */
+  uint32_t  newdat;  /* New data bitfield (for RX message objects) */
+  uint32_t  txrq;    /* Pending transmission bitfield */
+  bool      eob_set = false; /* Whether the End of Buffer bit has been set yet */
   
+  for (int i = TIVA_CAN_NUM_MSG_OBJS - 1; i >= 0; ++i)
+  {
+    if (fifo->msg_nums & (1 << i))
+    {
+      do
+        {
+          msgval = tivacan_readsplitreg32(
+                      dev->cd_priv->base + TIVA_CAN_OFFSET_MSG1VAL,
+                      dev->cd_priv->base + TIVA_CAN_OFFSET_MSG2VAL);
+          newdat = tivacan_readsplitreg32(
+                      dev->cd_priv->base + TIVA_CAN_OFFSET_NWDA1,
+                      dev->cd_priv->base + TIVA_CAN_OFFSET_NWDA2);
+          txrq   = tivacan_readsplitreg32(
+                      dev->cd_priv->base + TIVA_CAN_OFFSET_TXRQ1,
+                      dev->cd_priv->base + TIVA_CAN_OFFSET_TXRQ2);
+        }
+      /* Wait for any remaining reads or transmissions to complete */
+      while (msgval & (newdat | txrq) & 1 << i); /* TODO: This could cause a lock-up if the interrupt handler can't claim an iface */
+      
+      /* Command Mask Register
+       * 
+       * Write to message SRAM and access mask, control, and arbitration
+       * bits. Clear any interrupts (which might be spurious due to
+       * the hardware being uninitialized
+       */
+      reg = TIVA_CANIF_CMSK_WRNRD | TIVA_CANIF_CMSK_MASK | TIVA_CANIF_CMSK_CONTROL
+             TIVA_CANIF_CMSK_ARB | TIVA_CANIF_CMSK_CLRINTPND;
+      putreg32(reg, iface->base + TIVA_CANIF_OFFSET_CMSK);
+      
+      /* Mask 1 Register - lower 16 bits of extended ID mask */
+      putreg32(filter->xf_id2 & TIVA_CANIF_MSK1_IDMSK_EXT_MASK);
+      
+      /* Mask 2 Register
+       * Allow remote request frames through. This is done by disabling
+       * filter-on-direction (MDIR = 0), but setting the DIR bit in the ARB2
+       * register to 1 (TX).
+       */
+      reg = filter->xf_id2 & TIVA_CANIF_MSK2_IDMSK_EXT_MSK;
+      putreg32(reg, iface->base + TIVA_CANIF_OFFSET_MSK2);
+      
+      /* Arbitration 1 Register - lower 16 bits of extended ID */
+      putreg32(filter->xf_id1 & TIVA_CANIF_ARB1_ID_EXT_MASK);
+      
+      /* Arbitration 2 Register
+       * Mark the message object as valid. Set the DIR bit to allow remote frames.
+       */
+      reg = TIVA_CANIF_ARB2_MSGVAL | TIVA_CANIF_ARB2_DIR;
+      reg |= filter->xf_id1 & TIVA_CANIF_ARB2_ID_EXT_MASK;
+      putreg32(reg, iface->base + TIVA_CANIF_OFFSET_ARB2);
+      
+      /* Message Control Register
+       * Use acceptance filter masks, enable RX interrupts for this message
+       * object. DLC is initialized to zero but updated by received frames.
+       */
+      reg = TIVA_CANIF_MCTL_UMASK | TIVA_CANIF_MCTL_RXIE;
+      if (!eob_set)
+        {
+          reg |= TIVA_CANIF_MCTL_EOB;
+          eob_set = true;
+        }
+      
+      putreg32(reg, iface->base + TIVA_CANIF_OFFSET_MCTL);
+      
+      /* Request the registers be transferred to the message RAM and wait
+       * for the transfer to complete.
+       */
+      putreg32(i, iface->base + TIVA_CANIF_OFFSET_CRQ);
+      while (getreg32(iface->base + TIVA_CANIF_OFFSET_CRQ) & TIVA_CANIF_CRQ_BUSY);
+    }
+  }
+  
+  return OK;
 }
 
 /****************************************************************************
