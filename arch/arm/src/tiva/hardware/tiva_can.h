@@ -310,17 +310,21 @@
  * The following are defines for the bit fields in the CANIF1MSK1 register.
  ****************************************************************************/
 
-#define TIVA_CANIF_MSK1_IDMSK_MASK  0x0000FFFF  /* Identifier Mask */
-#define TIVA_CANIF_MSK1_IDMSK_SHIFT 0
+#define TIVA_CANIF_MSK1_IDMSK_EXT_MASK  0x0000FFFF  /* Identifier mask for lower 16 bits of extended ID */
+#define TIVA_CANIF_MSK1_IDMSK_EXT_SHIFT 0
 
 /****************************************************************************
  * The following are defines for the bit fields in the CANIF1MSK2 register.
  ****************************************************************************/
 
-#define TIVA_CANIF_MSK2_MXTD        0x00008000  /* Mask Extended Identifier */
-#define TIVA_CANIF_MSK2_MDIR        0x00004000  /* Mask Message Direction   */
-#define TIVA_CANIF_MSK2_IDMSK_MASK  0x00001FFF  /* Identifier Mask          */
-#define TIVA_CANIF_MSK2_IDMSK_SHIFT 0
+#define TIVA_CANIF_MSK2_MXTD                0x00008000  /* Mask Extended Identifier */
+#define TIVA_CANIF_MSK2_MDIR                0x00004000  /* Mask Message Direction   */
+#define TIVA_CANIF_MSK2_IDMSK_EXT_MASK      0x00001FFF  /* Identifier Mask for upper 13 bits of extended ID */
+#define TIVA_CANIF_MSK2_IDMSK_EXT_SHIFT     0           /* Shift LEFT by this number to place a value in this field */
+#define TIVA_CANIF_MSK2_IDMSK_EXT_PRESHIFT  16          /* Shift RIGHT by this number to get the chunk this register wants */
+
+#define TIVA_CANIF_MSK2_IDMSK_STD_MASK      0x00001FFA  /* MSK2 contains all 11 bits of a standard ID, but not aligned with 0 */
+#define TIVA_CANIF_MSK2_IDMSK_STD_SHIFT     2           /* Shift LEFT by this number to place a value in this field */
 
 /****************************************************************************
  * The following are defines for the bit fields in the CANIF1ARB1 register.

@@ -1501,9 +1501,23 @@ config TIVA_CAN_REGDEBUG
 		Output detailed register-level CAN device debug information.
 		Requires also CONFIG_DEBUG_CAN_INFO.
 
+config TIVA_CAN_DEFAULT_FIFO_DEPTH
+	int "Default CAN message FIFO depth"
+	range 1 16
+	default 4
+	---help---
+		This number determines the default depth for both TX and RX
+		hardware FIFOs in the CAN module. The size of a FIFO can be
+		adjusted at any time (and made deeper than this number if
+		needed) via the various CANIOC_TIVA ioctls. However, this
+		option is limited to 16 because the driver must allocate
+		one TX FIFO and 1 default RX filter FIFO. The default RX
+		filter FIFO is set to allow any messages, but is
+		reconfigured as soon as an application uses the
+		CANIOC_ADD_STDFILTER or CANIOC_ADD_EXTFILTER.
+
 config TIVA_CAN_FILTERS_MAX
 	int "Maximum number of CAN RX filters"
-	depends on TIVA_CAN0
 	range 1 31
 	default 8
 	---help---
