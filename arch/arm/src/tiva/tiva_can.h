@@ -160,7 +160,7 @@ extern "C"
  * 
  ****************************************************************************/
 
-FAR struct can_dev_s *tiva_can_initialize(FAR char *devpath, int modnum);
+int tiva_can_initialize(FAR char *devpath, int modnum);
 
 #undef EXTERN
 #if defined(__cplusplus)

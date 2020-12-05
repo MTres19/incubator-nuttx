@@ -121,7 +121,7 @@
 #define TIVA_CAN_BIT(n)       (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_BIT) /* CAN Bit Timing               */
 #define TIVA_CAN_INT(n)       (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_INT) /* CAN Interrupt                */
 #define TIVA_CAN_TST(n)       (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_TST) /* CAN Test                     */
-#define TIVA_CAN_OFFSET_BRPE  (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_BRPE)/* CAN Baud Rate Prescaler      *
+#define TIVA_CAN_BRPE(n)      (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_BRPE)/* CAN Baud Rate Prescaler      *
                                                                       * Extension                    */
 
 #define TIVA_CAN_IF1CRQ(n)    (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IF1CRQ)   /* CAN IF1 Command Request      */
