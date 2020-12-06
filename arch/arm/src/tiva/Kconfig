@@ -429,6 +429,7 @@ config TIVA_CAN
 	bool
 	default n
 	select CAN_TXREADY
+	select ARCH_HAVE_CAN_ERRORS
 
 config TIVA_HAVE_CAN0
 	bool

@@ -120,9 +120,11 @@ struct tiva_can_fifo_s
 
 struct tiva_canmod_s
 {
-  int       modnum;    /* Module number, mostly for syscon register fields */
-  uint32_t  base;      /* Registers base address */
-  mutex_t   thd_iface_mtx; /* Mutex for threads accessing the interface registers */
+  int       modnum;         /* Module number, mostly for syscon register fields */
+  uint32_t  base;           /* Registers base address */
+  uint32_t  status_reg;     /* Contents of the CANSTS reg, updated in ISR */
+  
+  mutex_t   thd_iface_mtx;  /* Mutex for threads accessing the interface registers */
   uint32_t  thd_iface_base; /* Interface registers for threads */
   uint32_t  isr_iface_base; /* Interface registers for the ISR */
   
@@ -131,8 +133,8 @@ struct tiva_canmod_s
   struct tiva_can_fifo_s fifos[CONFIG_TIVA_CAN_FILTERS_MAX + 1];
   
   /* Pointers to default FIFOs initialized by the driver */
-  struct tiva_can_fifo_s *tx_fifo;
-  struct tiva_can_fifo_s *rxdefault_fifo;
+  FAR struct tiva_can_fifo_s *tx_fifo;
+  FAR struct tiva_can_fifo_s *rxdefault_fifo;
 };
 
 /* This structure represents the CAN bit timing parameters */
@@ -271,7 +273,7 @@ static struct can_dev_s g_tivacan1dev =
 
 static void tivacan_reset(FAR struct can_dev_s *dev)
 {
-  struct tiva_canmod_s *canmod = dev->cd_priv;
+  FAR struct tiva_canmod_s *canmod = dev->cd_priv;
   int modnum = canmod->modnum;
 #ifndef CONFIG_TIVA_CAN0
   if (modnum == 0)
@@ -319,7 +321,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
 {
   uint32_t  irq;
   int       ret;
-  struct tiva_canmod_s    *canmod = dev->cd_priv;
+  FAR struct tiva_canmod_s    *canmod = dev->cd_priv;
   struct canioc_stdfilter_s default_filter =
   {
     .sf_id1   = 0x123,
@@ -417,7 +419,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
 static void tivacan_shutdown(FAR struct can_dev_s *dev)
 {
   int irq;
-  struct tiva_canmod_s    *canmod = dev->cd_priv;
+  FAR struct tiva_canmod_s    *canmod = dev->cd_priv;
   
   switch(canmod->modnum)
   {
@@ -620,6 +622,73 @@ static bool tivacan_txempty(FAR struct can_dev_s *dev)
 
 static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
 {
+  FAR struct tiva_canmod_s *canmod = dev->cd_priv;
+  uint32_t canint;
+  struct can_msg_s msg;
+  
+  while (canint = getreg32(canmod->base + TIVA_CAN_OFFSET_INT)
+                                      & TIVA_CAN_INT_INTID_MASK)
+  {
+    if (canint == TIVA_CAN_INT_INTID_STATUS)
+      {
+        /* Clear the status interrupt and report the errors */
+        canmod->status_reg = getreg32(canmod->base + TIVA_CAN_OFFSET_STS);
+#ifdef CONFIG_CAN_ERRORS
+        switch (canmod->status_reg & TIVA_CAN_STS_LEC_MASK)
+        {
+        case TIVA_CAN_STS_LEC_NONE:
+          {
+            
+          }
+        break;
+        case TIVA_CAN_STS_LEC_STUFF:
+          {
+            
+            
+          }
+        break;
+        case TIVA_CAN_STS_LEC_FORM:
+          {
+            
+          }
+        break;
+        case TIVA_CAN_STS_LEC_ACK:
+          {
+            
+          }
+        break;
+        case TIVA_CAN_STS_LEC_BIT1:
+          {
+            
+          }
+        break;
+        case TIVA_CAN_STS_LEC_BIT0:
+          {
+            
+          }
+        break;
+        case TIVA_CAN_STS_LEC_CRC:
+          {
+            
+          }
+        break;
+        case TIVA_CAN_STS_LEC_NOEVENT:
+          {
+            
+          }
+        default:
+        }
+#endif
+      }
+    else if (canint > 1 && canint < TIVA_CAN_NUM_MSG_OBJS)
+      {
+        /* Process the transmitted or received message */
+      }
+    else
+      {
+        /* The interrupt handler was called, but there is no interrupt...! */
+      }
+  }
   
 }
 
@@ -781,7 +850,7 @@ static struct tiva_can_fifo_s  *tivacan_alloc_fifo(FAR struct can_dev_s *dev,
   int i;
   int numclaimed = 0;
   int free_fifo_idx;
-  struct tiva_canmod_s *canmod = dev->cd_priv;
+  FAR struct tiva_canmod_s *canmod = dev->cd_priv;
   
   nxmutex_lock(&canmod->fifo_mtx);
   
@@ -891,14 +960,11 @@ static void tivacan_disable_msg_obj(uint32_t iface_base, int num)
   uint32_t reg;
   
   /* Signal a write (WRNRD) to the message SRAM touching the ARB registers */
-  reg = getreg32(iface_base + TIVA_CANIF_OFFSET_CMSK);
-  reg |= TIVA_CANIF_CMSK_WRNRD | TIVA_CANIF_CMSK_ARB;
-  putreg32(reg, iface_base + TIVA_CANIF_OFFSET_CMSK);
+  putreg32(TIVA_CANIF_CMSK_WRNRD | TIVA_CANIF_CMSK_ARB,
+           iface_base + TIVA_CANIF_OFFSET_CMSK);
   
-  /* Mark message object as invalid */
-  reg = getreg32(iface_base + TIVA_CANIF_OFFSET_ARB2);
-  reg &= ~(TIVA_CANIF_ARB2_MSGVAL);
-  putreg32(reg, iface_base + TIVA_CANIF_OFFSET_ARB2);
+  /* Mark message object as invalid */\
+  putreg32(~(TIVA_CANIF_ARB2_MSGVAL), iface_base + TIVA_CANIF_OFFSET_ARB2);
   
   /* Make sure the interface is not busy */
   while (getreg32(iface_base + TIVA_CANIF_OFFSET_CRQ) & TIVA_CANIF_CRQ_BUSY);
@@ -936,7 +1002,7 @@ static int  tivacan_initfilter_std(FAR struct can_dev_s          *dev,
   uint32_t  newdat;  /* New data bitfield (for RX message objects) */
   uint32_t  txrq;    /* Pending transmission bitfield */
   
-  struct tiva_canmod_s *canmod = dev->cd_priv;
+  FAR struct tiva_canmod_s *canmod = dev->cd_priv;
   uint32_t  canbase = canmod->base;
   uint32_t  iface_base = canmod->thd_iface_base;
   bool      eob_set = false; /* Whether the End of Buffer bit has been set yet */
@@ -1050,7 +1116,7 @@ static int  tivacan_initfilter_ext(FAR struct can_dev_s          *dev,
   uint32_t  newdat;  /* New data bitfield (for RX message objects) */
   uint32_t  txrq;    /* Pending transmission bitfield */
   
-  struct tiva_canmod_s *canmod = dev->cd_priv;
+  FAR struct tiva_canmod_s *canmod = dev->cd_priv;
   uint32_t  canbase = canmod->base;
   uint32_t  iface_base = canmod->thd_iface_base;
   bool      eob_set = false; /* Whether the End of Buffer bit has been set yet */
