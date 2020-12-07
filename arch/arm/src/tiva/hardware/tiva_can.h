@@ -323,7 +323,7 @@
 #define TIVA_CANIF_MSK2_IDMSK_EXT_SHIFT     0           /* Shift LEFT by this number to place a value in this field */
 #define TIVA_CANIF_MSK2_IDMSK_EXT_PRESHIFT  16          /* Shift RIGHT by this number to get the chunk this register wants */
 
-#define TIVA_CANIF_MSK2_IDMSK_STD_MASK      0x00001FFA  /* MSK2 contains all 11 bits of a standard ID, but not aligned with 0 */
+#define TIVA_CANIF_MSK2_IDMSK_STD_MASK      0x00001FFC  /* MSK2 contains all 11 bits of a standard ID, but not aligned with 0 */
 #define TIVA_CANIF_MSK2_IDMSK_STD_SHIFT     2           /* Shift LEFT by this number to place a value in this field */
 
 /****************************************************************************
@@ -344,7 +344,7 @@
 #define TIVA_CANIF_ARB2_ID_EXT_SHIFT    0           /* Shift LEFT by this number to place a value in this filed */
 #define TIVA_CANIF_ARB2_ID_EXT_PRESHIFT 16          /* Shift RIGHT by this number to get the chunk this register wants */
 
-#define TIVA_CANIF_ARB2_ID_STD_MASK     0x00001FFA  /* ARB2 contains all 11 bits of a standard ID, but not aligned with 0 */
+#define TIVA_CANIF_ARB2_ID_STD_MASK     0x00001FFC  /* ARB2 contains all 11 bits of a standard ID, but not aligned with 0 */
 #define TIVA_CANIF_ARB2_ID_STD_SHIFT    2           /* Shift LEFT by this number to place a value in this field */
 
 /****************************************************************************

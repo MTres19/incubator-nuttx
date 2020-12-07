@@ -89,7 +89,7 @@
 /* Convenience macro for combining two 16-bit registers into a single 32 bit
  * value
  */
-#define tivacan_readsplitreg32(r1, r2) (getreg32(r1) | getreg32(r2) << 16)
+#define tivacan_readsplitreg32(base, r1, r2) ((getreg32((base) + (r1)) & 0xff) | (getreg32((base) + (r2)) << 16))
 
 /****************************************************************************
  * Private Types
@@ -623,180 +623,271 @@ static bool tivacan_txempty(FAR struct can_dev_s *dev)
 
 static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
 {
-  FAR struct tiva_canmod_s *canmod = dev->cd_priv;
-  uint32_t canint;
+  FAR struct tiva_canmod_s *canmod = ((FAR struct can_dev_s *)dev)->cd_priv;
+  struct can_msg_s msg = {0};
   uint32_t cansts;
-  uint32_t reg;
-  struct can_msg_s msg;
-  static const struct can_msg_s zmsg; /* Empty message for reinitializing */
   
-  while (canint = getreg32(canmod->base + TIVA_CAN_OFFSET_INT)
-                                      & TIVA_CAN_INT_INTID_MASK)
-  {
-    /* Clear this message */
-    msg = zmsg;
-    
-    if (canint == TIVA_CAN_INT_INTID_STATUS)
-      {
-        /* Clear the status interrupt by reading CANSTS */
-        cansts = getreg32(canmod->base + TIVA_CAN_OFFSET_STS);
-        
+  uint32_t canint = getreg32(canmod->base + TIVA_CAN_OFFSET_INT)
+                                      & TIVA_CAN_INT_INTID_MASK;
+  if (canint == TIVA_CAN_INT_INTID_STATUS)
+    {
+      /* Clear the status interrupt by reading CANSTS */
+      cansts = getreg32(canmod->base + TIVA_CAN_OFFSET_STS);
+      
 #ifdef CONFIG_CAN_ERRORS
-        msg.cm_hdr.ch_error = true;
-        msg.cm_hdr.ch_dlc   = CAN_ERROR_DLC;
+      msg.cm_hdr.ch_error = true;
+      msg.cm_hdr.ch_dlc   = CAN_ERROR_DLC;
 #endif
-            
-        /* This is a new bus-off event, include the cause of the "last straw"
-         * error along with the bus-off indication error message to the app.
-         * Clear the INIT bit if autorecovery is enabled.
-         */
-        if (cansts & TIVA_CAN_STS_BOFF && ! canmod->status & TIVA_CAN_STS_BOFF)
-          {
-            if (canmod->autorecover)
-              {
-                modreg32(0, TIVA_CAN_CTL_INIT, canmod->base + TIVA_CAN_OFFSET_CTL);
-              }
+          
+      /* This is a new bus-off event, include the cause of the "last straw"
+        * error along with the bus-off indication error message to the app.
+        * Clear the INIT bit if autorecovery is enabled.
+        */
+      if (cansts & TIVA_CAN_STS_BOFF && ! (canmod->status & TIVA_CAN_STS_BOFF))
+        {
+          if (canmod->autorecover)
+            {
+              modreg32(0, TIVA_CAN_CTL_INIT, canmod->base + TIVA_CAN_OFFSET_CTL);
+            }
 #ifdef CONFIG_CAN_ERRORS
-            msg.cm_hdr.ch_id = CAN_ERROR_BUSOFF;
+          msg.cm_hdr.ch_id = CAN_ERROR_BUSOFF;
 #endif
-          }
+        }
 #ifdef CONFIG_CAN_ERRORS
 
-        /* If this an existing bus-off event and the module is recovering,
-         * just reset the Last Error Code and don't return an error message to
-         * the application. (All we have is a fake BIT0 error that indicates
-         * the CAN module is recovering.)
-         */
-        else if (cansts & TIVA_CAN_STS_BOFF && canmod->status & TIVA_CAN_STS_BOFF)
-          {
-            goto reset_lec_and_continue;
-          }
-        
-        /* The module has just finished recovering from bus-off, indicate this
-         * to the application. Skip checking the LEC because it will just be a
-         * BIT0 error (since the CAN module sets this error for every 11
-         * sequential recessive bits seen during bus-off recovery.)
-         */
-        else if (! cansts & TIVA_CAN_STS_BOFF && canmod->status & TIVA_CAN_STS_BOFF)
-          {
-            msg.cm_hdr.ch_id = CAN_ERROR_RESTARTED;
-            can_receive(dev, &msg.cm_hdr, msg.cm_data);
-            goto reset_lec_and_continue;
-          }
+      /* If this an existing bus-off event and the module is recovering,
+        * just reset the Last Error Code and don't return an error message to
+        * the application. (All we have is a fake BIT0 error that indicates
+        * the CAN module is recovering.)
+        */
+      else if (cansts & TIVA_CAN_STS_BOFF && canmod->status & TIVA_CAN_STS_BOFF)
+        {
+          goto reset_lec_and_continue;
+        }
+      
+      /* The module has just finished recovering from bus-off, indicate this
+        * to the application. Skip checking the LEC because it will just be a
+        * BIT0 error (since the CAN module sets this error for every 11
+        * sequential recessive bits seen during bus-off recovery.)
+        */
+      else if (! (cansts & TIVA_CAN_STS_BOFF) && canmod->status & TIVA_CAN_STS_BOFF)
+        {
+          msg.cm_hdr.ch_id = CAN_ERROR_RESTARTED;
+          can_receive(dev, &msg.cm_hdr, msg.cm_data);
+          goto reset_lec_and_continue;
+        }
 #endif
-        /* Save the contents of CANSTS to compare with next time */
-        canmod->status = cansts;
-        
+      /* Save the contents of CANSTS to compare with next time */
+      canmod->status = cansts;
+      
 #ifdef CONFIG_CAN_ERRORS
-        
-        /* This is not a bus-off event, or it is a brand-new bus-off event that
-         * we need to indicate the cause of the error for.
-         */
-        switch (canmod->status & TIVA_CAN_STS_LEC_MASK)
+      
+      /* This is not a bus-off event, or it is a brand-new bus-off event that
+        * we need to indicate the cause of the error for.
+        */
+      switch (canmod->status & TIVA_CAN_STS_LEC_MASK)
+      {
+      case TIVA_CAN_STS_LEC_NONE:
         {
-        case TIVA_CAN_STS_LEC_NONE:
-          {
-            /* Don't reset the LEC or return an error message - this is a
-             * normal condition and resetting it would just cause another
-             * status interrupt upon successful message transmission or
-             * receipt.
-             */
-            continue;
-          }
-        break;
-        case TIVA_CAN_STS_LEC_STUFF:
-          {
-            msg.cm_hdr.ch_id  |= CAN_ERROR_PROTOCOL;
-            msg.cm_data[2]    = CAN_ERROR2_STUFF;
-          }
-        break;
-        case TIVA_CAN_STS_LEC_FORM:
-          {
-            msg.cm_hdr.ch_id  |= CAN_ERROR_PROTOCOL;
-            msg.cm_data[2]    = CAN_ERROR2_FORM;
-          }
-        break;
-        case TIVA_CAN_STS_LEC_ACK:
-          {
-            msg.cm_hdr.ch_id  |= CAN_ERROR_NOACK;
-          }
-        break;
-        case TIVA_CAN_STS_LEC_BIT1:
-          {
-            msg.cm_hdr.ch_id  |= CAN_ERROR_PROTOCOL;
-            msg.cm_data[2]    = CAN_ERROR2_BIT1;
-          }
-        break;
-        case TIVA_CAN_STS_LEC_BIT0:
-          {
-            /* Note: this error code is set every time there is a sequence
-              * of 11 recessive bits during bus-off recovery (but this entire
-              * switch block only executes during normal operation and error
-              * passive).
-              */
-            msg.cm_hdr.ch_id |= CAN_ERROR_PROTOCOL;
-            msg.cm_data[2]   = CAN_ERROR_BIT2;
-          }
-        break;
-        case TIVA_CAN_STS_LEC_CRC:
-          {
-            msg.cm_hdr.ch_id  |= CAN_ERROR_PROTOCOL;
-            msg.cm_data[2]    = CAN_ERROR2_UNSPEC;
-            msg.cm_data[3]    = CAN_ERROR3_CRC_SEQ;
-          }
-        break;
-        case TIVA_CAN_STS_LEC_NOEVENT:
-          {
-            /* This shouldn't happen, but it's probably not worth sending
-             * an error message to the application about.
-             */
-            canerr("Status interrupt generated but no event occurred.\n");
-            continue;
-          }
-        default:
-          {
-            /* This shouldn't happen but it's probably not worth sending
-             * an error message to the application about.
-             */
-            canerr("Invalid value for Last Error Code (LEC).\n");
-            continue;
-          }
+          /* Don't reset the LEC or return an error message - this is a
+            * normal condition and resetting it would just cause another
+            * status interrupt upon successful message transmission or
+            * receipt.
+            */
+          return OK;
         }
-        
-        /* Return the error message to the application */
-        can_receive(dev, &msg.cm_hdr, msg.cm_data);
-        
+      break;
+      case TIVA_CAN_STS_LEC_STUFF:
+        {
+          msg.cm_hdr.ch_id  |= CAN_ERROR_PROTOCOL;
+          msg.cm_data[2]    = CAN_ERROR2_STUFF;
+        }
+      break;
+      case TIVA_CAN_STS_LEC_FORM:
+        {
+          msg.cm_hdr.ch_id  |= CAN_ERROR_PROTOCOL;
+          msg.cm_data[2]    = CAN_ERROR2_FORM;
+        }
+      break;
+      case TIVA_CAN_STS_LEC_ACK:
+        {
+          msg.cm_hdr.ch_id  |= CAN_ERROR_NOACK;
+        }
+      break;
+      case TIVA_CAN_STS_LEC_BIT1:
+        {
+          msg.cm_hdr.ch_id  |= CAN_ERROR_PROTOCOL;
+          msg.cm_data[2]    = CAN_ERROR2_BIT1;
+        }
+      break;
+      case TIVA_CAN_STS_LEC_BIT0:
+        {
+          /* Note: this error code is set every time there is a sequence
+            * of 11 recessive bits during bus-off recovery (but this entire
+            * switch block only executes during normal operation and error
+            * passive).
+            */
+          msg.cm_hdr.ch_id |= CAN_ERROR_PROTOCOL;
+          msg.cm_data[2]   = CAN_ERROR_BIT2;
+        }
+      break;
+      case TIVA_CAN_STS_LEC_CRC:
+        {
+          msg.cm_hdr.ch_id  |= CAN_ERROR_PROTOCOL;
+          msg.cm_data[2]    = CAN_ERROR2_UNSPEC;
+          msg.cm_data[3]    = CAN_ERROR3_CRC_SEQ;
+        }
+      break;
+      case TIVA_CAN_STS_LEC_NOEVENT:
+        {
+          /* This shouldn't happen, but it's probably not worth sending
+            * an error message to the application about.
+            */
+          canerr("Status interrupt generated but no event occurred.\n");
+          return OK;
+        }
+      default:
+        {
+          /* This shouldn't happen but it's probably not worth sending
+            * an error message to the application about.
+            */
+          canerr("Invalid value for Last Error Code (LEC).\n");
+          return OK;
+        }
+      }
+      
+      /* Return the error message to the application */
+      can_receive(dev, &msg.cm_hdr, msg.cm_data);
+      
 reset_lec_and_continue:
-        /* Reset the Last Error Code on abnormal events. During normal
-         * operation, the application should be notified of every error
-         * that occurs. For bus-off recovery, we want the Last Error Code
-         * to be reset so that we get a meaningful result if an error occurs
-         * immediately after the controller turns back on. When a status
-         * interrupt is generated because the LEC switches to "no error"
-         * this is bypassed with a direct "continue" statement. This
-         * is also bypassed when error messages are disabled (due to
-         * the ifdef).
-         */
-        if (cansts & TIVA_CAN_STS_LEC_MASK != TIVA_CAN_STS_LEC_NONE
-            && cansts & TIVA_CAN_STS_LEC_MASK != TIVA_CAN_STS_LEC_NOEVENT)
-        {
-          putreg32(cansts | TIVA_CAN_STS_LEC_NOEVENT,
-                                canmod->base + TIVA_CAN_OFFSET_STS);
-        }
-        
+      /* Reset the Last Error Code on abnormal events. During normal
+        * operation, the application should be notified of every error
+        * that occurs. For bus-off recovery, we want the Last Error Code
+        * to be reset so that we get a meaningful result if an error occurs
+        * immediately after the controller turns back on. When a status
+        * interrupt is generated because the LEC switches to "no error"
+        * this is bypassed with a direct return statement. This
+        * is also bypassed when error messages are disabled (due to
+        * the ifdef).
+        */
+      if (cansts & TIVA_CAN_STS_LEC_MASK != TIVA_CAN_STS_LEC_NONE
+          && cansts & TIVA_CAN_STS_LEC_MASK != TIVA_CAN_STS_LEC_NOEVENT)
+      {
+        putreg32(cansts | TIVA_CAN_STS_LEC_NOEVENT,
+                              canmod->base + TIVA_CAN_OFFSET_STS);
+      }
+      
 #endif /* CONFIG_CAN_ERRORS */
-        
-        continue;
-      }
-    else if (canint > 1 && canint < TIVA_CAN_NUM_MSG_OBJS)
-      {
-        /* Process the transmitted or received message */
-      }
-    else
-      {
-        /* The interrupt handler was called, but there is no interrupt...! */
-      }
-  }
+      
+      return OK;
+    }
+  else if (canint > 1 && canint < TIVA_CAN_NUM_MSG_OBJS)
+    {
+      /* Process the transmitted or received message(s). Since hardware FIFOs
+       * are used and new messages are received into the mailbox with the
+       * lowest number, we have to process messages in this order too to
+       * preserve ordering.
+       */
+      
+      for (int i = canint - 1; i < TIVA_CAN_NUM_MSG_OBJS; ++i)
+        {
+          /* Check if there's an interrupt pending for this message object */
+          if (! (tivacan_readsplitreg32(canmod->base, TIVA_CAN_OFFSET_MSG1INT,
+                                                    TIVA_CAN_OFFSET_MSG2INT)
+              & 1 << i))
+            {
+              continue;
+            }
+          
+          /* Identify if this message is TX or RX */
+          if (1 << i & canmod->tx_fifo->msg_nums)
+            {
+              /* TODO: How should persistent remote responder messages be configured?
+               * should such a thing be supported?
+               */
+              
+              /* Read CANSTS to clear the interrupt */
+              getreg32(canmod->base + TIVA_CAN_OFFSET_STS);
+              can_txready(dev);
+            }
+          else
+            {
+              uint32_t reg;
+              
+              /* Command Mask register
+               * Pull arbitration bits, control bits, and data bits from the
+               * message SRAM. Clear the interrupt and the new data bit.
+               */
+              reg = TIVA_CANIF_CMSK_ARB | TIVA_CANIF_CMSK_CONTROL
+                    | TIVA_CANIF_CMSK_CLRINTPND | TIVA_CANIF_CMSK_NEWDAT
+                    | TIVA_CANIF_CMSK_DATAA | TIVA_CANIF_CMSK_DATAB;
+              putreg32(reg, canmod->isr_iface_base + TIVA_CANIF_OFFSET_CMSK);
+              
+              /* Submit request */
+              putreg32(i + 1, canmod->isr_iface_base + TIVA_CANIF_OFFSET_CRQ);
+              
+              /* Wait for response */
+              while (getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_CRQ)
+                                                        & TIVA_CANIF_CRQ_BUSY);
+              
+              /* ARB2 - upper chunk of the message ID, direction, and extended
+               * message indication.
+               */
+              reg = getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_ARB2);
+              
+              /* TODO: is this correct? On remote frames, is the DIR bit set
+               * or the RMTEN bit?
+               */
+              msg.cm_hdr.ch_rtr = (bool)(reg & TIVA_CANIF_ARB2_DIR);
+              
+#ifdef CONFIG_CAN_EXTID
+              msg.cm_hdr.ch_extid = (bool)(reg & TIVA_CANIF_ARB2_XTD);
+              if (msg.cm_hdr.ch_extid)
+                {
+                  msg.cm_hdr.ch_id = (reg & TIVA_CANIF_ARB2_ID_EXT_MASK)
+                                          << TIVA_CANIF_ARB2_ID_EXT_PRESHIFT;
+                  
+                  /* ARB1 - lower chunk of the message ID for extended IDs only */
+                  reg = getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_ARB1);
+                  
+                  msg.cm_hdr.ch_id |= reg & TIVA_CANIF_ARB1_ID_EXT_MASK;
+                }
+              else
+                {
+                  msg.cm_hdr.ch_id = (reg & TIVA_CANIF_ARB2_ID_STD_MASK)
+                                            >> TIVA_CANIF_ARB2_ID_STD_SHIFT;
+                }
+#else
+              msg.cm_hdr.ch_id = (reg & TIVA_CANIF_ARB2_ID_STD_MASK)
+                                        >> TIVA_CANIF_ARB2_ID_STD_SHIFT;
+#endif /* CONFIG_CAN_EXTID */
+              
+              /* Message Control - remote enable (RMTEN) & data length code */
+              reg = getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_MCTL);
+              msg.cm_hdr.ch_dlc = reg & TIVA_CANIF_MCTL_DLC_MASK;
+              
+              /* Data registers. Note: following the example of STM32 with
+               * host byte order (little endian) here
+               */
+              reg = tivacan_readsplitreg32(canmod->isr_iface_base,
+                                           TIVA_CANIF_OFFSET_DA1,
+                                           TIVA_CANIF_OFFSET_DA2);
+              *(uint32_t *)msg.cm_data = reg;
+              
+              reg = tivacan_readsplitreg32(canmod->isr_iface_base,
+                                           TIVA_CANIF_OFFSET_DB1,
+                                           TIVA_CANIF_OFFSET_DB2);
+              *((uint32_t *)msg.cm_data + 1) = reg;
+              
+              can_receive(dev, &msg.cm_hdr, msg.cm_data);
+            }
+        }
+    }
+  else
+    {
+      /* The interrupt handler was called, but there is no interrupt...! */
+      canerr("ISR called but no interrupt given!\n");
+    }
   
 }
 
@@ -1077,8 +1168,8 @@ static void tivacan_disable_msg_obj(uint32_t iface_base, int num)
   /* Make sure the interface is not busy */
   while (getreg32(iface_base + TIVA_CANIF_OFFSET_CRQ) & TIVA_CANIF_CRQ_BUSY);
   
-  /* Submit request */
-  putreg32(num, iface_base + TIVA_CANIF_OFFSET_CRQ);
+  /* Submit request. Message objects are 1-indexed in hardware */
+  putreg32(num + 1, iface_base + TIVA_CANIF_OFFSET_CRQ);
 }
 
 /****************************************************************************
@@ -1123,15 +1214,12 @@ static int  tivacan_initfilter_std(FAR struct can_dev_s          *dev,
     {
       do
         {
-          msgval = tivacan_readsplitreg32(
-                      canbase + TIVA_CAN_OFFSET_MSG1VAL,
-                      canbase + TIVA_CAN_OFFSET_MSG2VAL);
-          newdat = tivacan_readsplitreg32(
-                      canbase + TIVA_CAN_OFFSET_NWDA1,
-                      canbase + TIVA_CAN_OFFSET_NWDA2);
-          txrq   = tivacan_readsplitreg32(
-                      canbase + TIVA_CAN_OFFSET_TXRQ1,
-                      canbase + TIVA_CAN_OFFSET_TXRQ2);
+          msgval = tivacan_readsplitreg32(canbase, TIVA_CAN_OFFSET_MSG1VAL,
+                                                    TIVA_CAN_OFFSET_MSG2VAL);
+          newdat = tivacan_readsplitreg32(canbase, TIVA_CAN_OFFSET_NWDA1,
+                                                    TIVA_CAN_OFFSET_NWDA2);
+          txrq   = tivacan_readsplitreg32(canbase, TIVA_CAN_OFFSET_TXRQ1,
+                                                    TIVA_CAN_OFFSET_TXRQ2);
         }
       /* Wait for any remaining reads or transmissions to complete */
       while (msgval & (newdat | txrq) & 1 << i); /* TODO: This could cause a lock-up if the interrupt handler can't claim an iface */
@@ -1178,9 +1266,10 @@ static int  tivacan_initfilter_std(FAR struct can_dev_s          *dev,
       putreg32(reg, iface_base + TIVA_CANIF_OFFSET_MCTL);
       
       /* Request the registers be transferred to the message RAM and wait
-       * for the transfer to complete.
+       * for the transfer to complete. Message objects are 1-indexed in
+       * hardware.
        */
-      putreg32(i, iface_base + TIVA_CANIF_OFFSET_CRQ);
+      putreg32(i + 1, iface_base + TIVA_CANIF_OFFSET_CRQ);
       while (getreg32(iface_base + TIVA_CANIF_OFFSET_CRQ) & TIVA_CANIF_CRQ_BUSY);
     }
   }
@@ -1235,15 +1324,12 @@ static int  tivacan_initfilter_ext(FAR struct can_dev_s          *dev,
     {
       do
         {
-          msgval = tivacan_readsplitreg32(
-                      canbase + TIVA_CAN_OFFSET_MSG1VAL,
-                      canbase + TIVA_CAN_OFFSET_MSG2VAL);
-          newdat = tivacan_readsplitreg32(
-                      canbase + TIVA_CAN_OFFSET_NWDA1,
-                      canbase + TIVA_CAN_OFFSET_NWDA2);
-          txrq   = tivacan_readsplitreg32(
-                      canbase + TIVA_CAN_OFFSET_TXRQ1,
-                      canbase + TIVA_CAN_OFFSET_TXRQ2);
+          msgval = tivacan_readsplitreg32(canbase, TIVA_CAN_OFFSET_MSG1VAL,
+                                                    TIVA_CAN_OFFSET_MSG2VAL);
+          newdat = tivacan_readsplitreg32(canbase, TIVA_CAN_OFFSET_NWDA1,
+                                                    TIVA_CAN_OFFSET_NWDA2);
+          txrq   = tivacan_readsplitreg32(canbase, TIVA_CAN_OFFSET_TXRQ1,
+                                                    TIVA_CAN_OFFSET_TXRQ2);
         }
       /* Wait for any remaining reads or transmissions to complete */
       while (msgval & (newdat | txrq) & 1 << i); /* TODO: This could cause a lock-up if the interrupt handler can't claim an iface */
@@ -1293,9 +1379,10 @@ static int  tivacan_initfilter_ext(FAR struct can_dev_s          *dev,
       putreg32(reg, iface_base + TIVA_CANIF_OFFSET_MCTL);
       
       /* Request the registers be transferred to the message RAM and wait
-       * for the transfer to complete.
+       * for the transfer to complete. Message objects are 1-indexed in
+       * hardware
        */
-      putreg32(i, iface_base + TIVA_CANIF_OFFSET_CRQ);
+      putreg32(i + 1, iface_base + TIVA_CANIF_OFFSET_CRQ);
       while (getreg32(iface_base + TIVA_CANIF_OFFSET_CRQ) & TIVA_CANIF_CRQ_BUSY);
     }
   }
