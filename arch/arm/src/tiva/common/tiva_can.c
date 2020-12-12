@@ -308,7 +308,14 @@ static void tivacan_reset(FAR struct can_dev_s *dev)
     }
   
   modifyreg32(TIVA_SYSCON_SRCAN, 0, SYSCON_SRCAN(modnum));
+  
+  /* Spin for a few clock cycles */
+  for (int i = 0; i < 16; ++i);
+  
   modifyreg32(TIVA_SYSCON_SRCAN, SYSCON_SRCAN(modnum), 0);
+  
+  /* Wait for peripheral-ready signal */
+  while (!(getreg32(TIVA_SYSCON_PRCAN) & (1 << modnum)));
 }
 
 /****************************************************************************
@@ -336,6 +343,16 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
   uint32_t  irq;
   int       ret;
   FAR struct tiva_canmod_s    *canmod = dev->cd_priv;
+  
+#ifdef CONFIG_CAN_EXTID
+  struct canioc_extfilter_s default_filter =
+  {
+    .xf_id1   = 0x123,
+    .xf_id2   = 0,
+    .xf_type  = CAN_FILTER_MASK,
+    .sf_prio  = CAN_MSGPRIO_HIGH,
+  };
+#else
   struct canioc_stdfilter_s default_filter =
   {
     .sf_id1   = 0x123,
@@ -343,17 +360,21 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
     .sf_type  = CAN_FILTER_MASK,
     .sf_prio  = CAN_MSGPRIO_HIGH,
   };
+#endif
   
   /* TODO: This does not belong here, different boards could have different
    * crystals!
    */
   struct tiva_can_timing_s default_timing =
   {
-    .prescaler  = 4,
+    .prescaler  = 8,
     .tseg1      = 6,
     .tseg2      = 3,
     .sjw        = 3,
   };
+  
+  /* Clear the status interrupt, just in case */
+  getreg32(canmod->base + TIVA_CAN_OFFSET_STS);
   
   /* Set default bit timing */
   tivacan_bittiming_set(&default_timing, dev);
@@ -400,15 +421,18 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
   
   /* Exit init mode and enable interrupts from the CAN module */
   modifyreg32(canmod->base + TIVA_CAN_OFFSET_CTL, TIVA_CAN_CTL_INIT,
-              TIVA_CAN_CTL_EIE | TIVA_CAN_CTL_SIE | TIVA_CAN_CTL_IE);
+              TIVA_CAN_CTL_EIE | TIVA_CAN_CTL_SIE | TIVA_CAN_CTL_IE | TIVA_CAN_CTL_DAR);
   
   canmod->rxdefault_fifo = tivacan_alloc_fifo(dev,
                                         CONFIG_TIVA_CAN_DEFAULT_FIFO_DEPTH);
   
   /* TODO: Check return values */
   
+#ifdef CONFIG_CAN_EXTID
+  tivacan_initfilter_ext(dev, canmod->rxdefault_fifo, &default_filter);
+#else
   tivacan_initfilter_std(dev, canmod->rxdefault_fifo, &default_filter);
-  
+#endif
   
   return OK;
 }
@@ -654,7 +678,16 @@ static int tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
       putreg32(reg, canmod->thd_iface_base + TIVA_CANIF_OFFSET_DATA(i));
     }
   
-  /* TODO: continue this */
+  /* Submit request */
+  putreg32(TIVA_CAN_TX_MBOX_NUM,
+           canmod->thd_iface_base + TIVA_CANIF_OFFSET_CRQ);
+  
+  /* Wait for completion */
+  while (getreg32(canmod->thd_iface_base + TIVA_CANIF_OFFSET_CRQ)
+          & TIVA_CANIF_CRQ_BUSY);
+  
+  nxmutex_unlock(&canmod->thd_iface_mtx);
+  return OK;
 }
 
 /****************************************************************************
@@ -703,8 +736,10 @@ static bool tivacan_txready(FAR struct can_dev_s *dev)
 static bool tivacan_txempty(FAR struct can_dev_s *dev)
 {
   FAR struct tiva_canmod_s *canmod = dev->cd_priv;
+  uint32_t txrq = tivacan_readsplitreg32(canmod->base, TIVA_CAN_OFFSET_TXRQ1,
+                                         TIVA_CAN_OFFSET_TXRQ2);
   
-  return !(getreg32(canmod->base + TIVA_CAN_OFFSET_TXRQ2) & TIVA_CAN_TX_MBOX_MASK);
+  return !(txrq & TIVA_CAN_TX_MBOX_MASK);
 }
 
 /****************************************************************************
@@ -1070,6 +1105,8 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
           canerr("ISR called but no interrupt given!\n");
         }
     } /* while CANINT reg != 0*/
+    
+    return OK;
 }
 
 
@@ -1152,7 +1189,7 @@ static void tivacan_bittiming_set(FAR struct tiva_can_timing_s *timing,
   DEBUGASSERT(timing->tseg1 > TIVA_CAN_TSEG1_MIN &&
               timing->tseg1 < TIVA_CAN_PRESCALER_MAX);
   DEBUGASSERT(timing->tseg2 > TIVA_CAN_TSEG2_MIN &&
-              timing->tseg2 < TIVA_CAN_TSEG2_MIN);
+              timing->tseg2 < TIVA_CAN_TSEG2_MAX);
   DEBUGASSERT(timing->sjw > TIVA_CAN_SJW_MIN &&
               timing->sjw < TIVA_CAN_SJW_MAX);
   
@@ -1269,7 +1306,7 @@ static struct tiva_can_fifo_s  *tivacan_alloc_fifo(FAR struct can_dev_s *dev,
        * NOTE: If a new chip came along with more than 32 message objects,
        *       this would need to be reworked.
        */
-      claimed &= 0xffffffff >> (31 - i);
+      claimed &= 0xffffffff >> (32 - i);
       canmod->fifos[free_fifo_idx].msg_nums = claimed;
       
       nxmutex_unlock(&canmod->fifo_mtx);
@@ -1301,7 +1338,7 @@ static void tivacan_free_fifo(FAR struct can_dev_s *dev,
   int modnum = canmod->modnum;
   nxmutex_lock(&canmod->thd_iface_mtx);
   
-  for (int i = 0; i < 32; ++i)
+  for (int i = 0; i < TIVA_CAN_NUM_MSG_OBJS; ++i)
     {
       if (fifo->msg_nums & 1 << i)
         {
@@ -1345,8 +1382,8 @@ static void tivacan_disable_msg_obj(uint32_t iface_base, int num)
   putreg32(TIVA_CANIF_CMSK_WRNRD | TIVA_CANIF_CMSK_ARB,
            iface_base + TIVA_CANIF_OFFSET_CMSK);
   
-  /* Mark message object as invalid */\
-  putreg32(~(TIVA_CANIF_ARB2_MSGVAL), iface_base + TIVA_CANIF_OFFSET_ARB2);
+  /* Mark message object as invalid */
+  putreg32(0, iface_base + TIVA_CANIF_OFFSET_ARB2);
   
   /* Make sure the interface is not busy */
   while (getreg32(iface_base + TIVA_CANIF_OFFSET_CRQ) & TIVA_CANIF_CRQ_BUSY);
@@ -1405,7 +1442,7 @@ static int  tivacan_initfilter_std(FAR struct can_dev_s          *dev,
                                                     TIVA_CAN_OFFSET_TXRQ2);
         }
       /* Wait for any remaining reads or transmissions to complete */
-      while (msgval & (newdat | txrq) & 1 << i); /* TODO: This could cause a lock-up if the interrupt handler can't claim an iface */
+      while (msgval & (newdat | txrq) & 1 << i); /
       
       /* Command Mask Register
        * 
@@ -1515,7 +1552,7 @@ static int  tivacan_initfilter_ext(FAR struct can_dev_s          *dev,
                                                     TIVA_CAN_OFFSET_TXRQ2);
         }
       /* Wait for any remaining reads or transmissions to complete */
-      while (msgval & (newdat | txrq) & 1 << i); /* TODO: This could cause a lock-up if the interrupt handler can't claim an iface */
+      while (msgval & (newdat | txrq) & 1 << i);
       
       /* Command Mask Register
        * 
