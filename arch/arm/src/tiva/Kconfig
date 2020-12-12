@@ -425,10 +425,13 @@ config TIVA_HAVE_ADC1
 	bool
 	default n
 
+# CAN_TXREADY not used because the Tiva CAN controller doesn't fix
+# the "internal priority inversion" problem." If this driver is
+# ported to the SocketCAN model, software TX arbitration would be
+# required and the txready interface would be gutted anyway.
 config TIVA_CAN
 	bool
 	default n
-	select CAN_TXREADY
 	select ARCH_HAVE_CAN_ERRORS
 
 config TIVA_HAVE_CAN0
@@ -1503,16 +1506,16 @@ config TIVA_CAN_REGDEBUG
 		Requires also CONFIG_DEBUG_CAN_INFO.
 
 config TIVA_CAN_DEFAULT_FIFO_DEPTH
-	int "Default CAN message FIFO depth"
-	range 1 16
+	int "Default CAN message RX FIFO depth"
+	range 1 31
 	default 4
 	---help---
-		This number determines the default depth for both TX and RX
+		This number determines the default depth for both RX
 		hardware FIFOs in the CAN module. The size of a FIFO can be
 		adjusted at any time (and made deeper than this number if
 		needed) via the various CANIOC_TIVA ioctls. However, this
-		option is limited to 16 because the driver must allocate
-		one TX FIFO and 1 default RX filter FIFO. The default RX
+		option is limited to 31 because the driver must allocate
+		one mailbox for outbound (TX) messages. The default RX
 		filter FIFO is set to allow any messages, but is
 		reconfigured as soon as an application uses the
 		CANIOC_ADD_STDFILTER or CANIOC_ADD_EXTFILTER.
@@ -1525,8 +1528,8 @@ config TIVA_CAN_FILTERS_MAX
 		This number applies to both CAN0 and CAN1, if the chip has
 		both. (This is the number of filters for each module, not the
 		total for both CAN modules.)
-		The Tiva CAN modules have 32 message objects. Assuming only
-		one is used for TX, it is possible to have up to 31 unique
+		The Tiva CAN modules have 32 message objects. Only one is
+		used for TX, so it is possible to have up to 31 unique
 		RX filters. However, increasing the FIFO depth of a filter
 		uses up message objects and reduces this number. Additionally,
 		since the driver has to keep track of the message objects
