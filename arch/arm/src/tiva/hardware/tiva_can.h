@@ -176,6 +176,8 @@
 #define TIVA_CANIF_OFFSET_DB1   0x00000024
 #define TIVA_CANIF_OFFSET_DB2   0x00000028
 
+#define TIVA_CANIF_OFFSET_DATA(n) (TIVA_CANIF_OFFSET_DA1 + (i) * 0x4)
+
 #define TIVA_CAN_OFFSET_IFACE(i) (TIVA_CAN_OFFSET_IFACE1_BASE + (i) * 0x60)
 #define TIVA_CAN_IFACE_BASE(n,i) (TIVA_CAN_BASE(n)+TIVA_CAN_OFFSET_IFACE(i))
 
@@ -364,32 +366,14 @@
 #define TIVA_CANIF_MCTL_DLC_SHIFT   0
 
 /****************************************************************************
- * The following are defines for the bit fields in the CANIF1DA1 register.
+ * The following are defines for the bit fields in the CANIF1D(A,B)(1,2)
+ * registers. H and L refer to high and low bytes in network byte order.
  ****************************************************************************/
 
-#define TIVA_CANIF_DA1_DATA_MASK    0x0000FFFF  /* Data */
-#define TIVA_CANIF_DA1_DATA_SHIFT   0
-
-/****************************************************************************
- * The following are defines for the bit fields in the CANIF1DA2 register.
- ****************************************************************************/
-
-#define TIVA_CANIF_DA2_DATA_MASK    0x0000FFFF  /* Data */
-#define TIVA_CANIF_DA2_DATA_SHIFT   0
-
-/****************************************************************************
- * The following are defines for the bit fields in the CANIF1DB1 register.
- ****************************************************************************/
-
-#define TIVA_CANIF_DB1_DATA_MASK    0x0000FFFF  /* Data */
-#define TIVA_CANIF_DB1_DATA_SHIFT   0
-
-/****************************************************************************
- * The following are defines for the bit fields in the CANIF1DB2 register.
- ****************************************************************************/
-
-#define TIVA_CANIF_DB2_DATA_MASK    0x0000FFFF  /* Data */
-#define TIVA_CANIF_DB2_DATA_SHIFT   0
+#define TIVA_CANIF_DATA_HBYTE_MASK     0x000000FF
+#define TIVA_CANIF_DATA_HBYTE_SHIFT 0
+#define TIVA_CANIF_DATA_LBYTE_MASK     0x0000FF00
+#define TIVA_CANIF_DATA_LBYTE_SHIFT 8
 
 /****************************************************************************
  * The following are defines for the bit fields in the CANTXRQ1 register.

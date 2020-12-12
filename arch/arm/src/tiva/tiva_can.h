@@ -51,11 +51,6 @@
 
 /* Tiva-specific Ioctl Commands *********************************************
  * 
- * CANIOC_TIVA_ARE_THE_FIFOS_SHARED
- *   Description:     Query whether TX and RX FIFOs share the same memory area
- *   Argument:        Not used
- *   Returned value:  Boolean, true if FIFOs are shared, false otherwise.
- * 
  * CANIOC_TIVA_RXFILTER_FIFO_MAXDEPTH_GET
  *   Description:     Returns the maximum size of the filter's RX FIFO
  *                    (not the actual size of the FIFO). For Tiva CAN
@@ -107,16 +102,15 @@
  */
 
 #define CAN_TIVA_FIRST (CAN_FIRST + CAN_NCMDS)
-#define CAN_TIVA_NCMDS 8
+#define CAN_TIVA_NCMDS 7
 
-#define CANIOC_TIVA_ARE_THE_FIFOS_SHARED        _CANIOC(CAN_TIVA_FIRST + 0)
-#define CANIOC_TIVA_RXFILTER_FIFO_MAXDEPTH_GET  _CANIOC(CAN_TIVA_FIRST + 1)
-#define CANIOC_TIVA_RXFILTER_FIFO_DEPTH_GET     _CANIOC(CAN_TIVA_FIRST + 2)
-#define CANIOC_TIVA_RXFILTER_FIFO_DEPTH_SET     _CANIOC(CAN_TIVA_FIRST + 3)
-#define CANIOC_TIVA_TXFIFO_MAX_DEPTH_GET        _CANIOC(CAN_TIVA_FIRST + 4)
-#define CANIOC_TIVA_TXFIFO_DEPTH_GET            _CANIOC(CAN_TIVA_FIRST + 5)
-#define CANIOC_TIVA_TXFIFO_DEPTH_SET            _CANIOC(CAN_TIVA_FIRST + 6)
-#define CANIOC_TIVA_ENQUEUE_RTR_MESSAGE         _CANIOC(CAN_TIVA_FIRST + 7)
+#define CANIOC_TIVA_RXFILTER_FIFO_MAXDEPTH_GET  _CANIOC(CAN_TIVA_FIRST + 0)
+#define CANIOC_TIVA_RXFILTER_FIFO_DEPTH_GET     _CANIOC(CAN_TIVA_FIRST + 1)
+#define CANIOC_TIVA_RXFILTER_FIFO_DEPTH_SET     _CANIOC(CAN_TIVA_FIRST + 2)
+#define CANIOC_TIVA_TXFIFO_MAX_DEPTH_GET        _CANIOC(CAN_TIVA_FIRST + 3)
+#define CANIOC_TIVA_TXFIFO_DEPTH_GET            _CANIOC(CAN_TIVA_FIRST + 4)
+#define CANIOC_TIVA_TXFIFO_DEPTH_SET            _CANIOC(CAN_TIVA_FIRST + 5)
+#define CANIOC_TIVA_ENQUEUE_RTR_MESSAGE         _CANIOC(CAN_TIVA_FIRST + 6)
 
 #ifndef __ASSEMBLY__
 
