@@ -350,7 +350,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
     .xf_id1   = 0x123,
     .xf_id2   = 0,
     .xf_type  = CAN_FILTER_MASK,
-    .sf_prio  = CAN_MSGPRIO_HIGH,
+    .xf_prio  = CAN_MSGPRIO_HIGH,
   };
 #else
   struct canioc_stdfilter_s default_filter =
@@ -1049,10 +1049,10 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
               /* TODO: is this correct? On remote frames, is the DIR bit set
                * or the RMTEN bit?
                */
-              msg.cm_hdr.ch_rtr = (bool)(reg & TIVA_CANIF_ARB2_DIR);
+              msg.cm_hdr.ch_rtr = (0 != (reg & TIVA_CANIF_ARB2_DIR));
               
 #ifdef CONFIG_CAN_EXTID
-              msg.cm_hdr.ch_extid = (bool)(reg & TIVA_CANIF_ARB2_XTD);
+              msg.cm_hdr.ch_extid = (0 != (reg & TIVA_CANIF_ARB2_XTD));
               if (msg.cm_hdr.ch_extid)
                 {
                   msg.cm_hdr.ch_id = (reg & TIVA_CANIF_ARB2_ID_EXT_MASK)
@@ -1442,7 +1442,7 @@ static int  tivacan_initfilter_std(FAR struct can_dev_s          *dev,
                                                     TIVA_CAN_OFFSET_TXRQ2);
         }
       /* Wait for any remaining reads or transmissions to complete */
-      while (msgval & (newdat | txrq) & 1 << i); /
+      while (msgval & (newdat | txrq) & 1 << i);
       
       /* Command Mask Register
        * 
