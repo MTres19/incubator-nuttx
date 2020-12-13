@@ -419,6 +419,10 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
   /* Enable the ISR */
   up_enable_irq(irq);
   
+  modifyreg32(canmod->base + TIVA_CAN_OFFSET_CTL, 0, TIVA_CAN_CTL_TEST);
+  modifyreg32(canmod->base + TIVA_CAN_OFFSET_TST, 0xffffffff, 0);
+  modifyreg32(canmod->base + TIVA_CAN_OFFSET_CTL, TIVA_CAN_CTL_TEST, 0);
+  
   /* Exit init mode and enable interrupts from the CAN module */
   modifyreg32(canmod->base + TIVA_CAN_OFFSET_CTL, TIVA_CAN_CTL_INIT,
               TIVA_CAN_CTL_EIE | TIVA_CAN_CTL_SIE | TIVA_CAN_CTL_IE | TIVA_CAN_CTL_DAR);
@@ -618,8 +622,9 @@ static int tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
   /* NOTE: being extra careful here and setting TXRQST in the command mask
    * register even though we also set it in the message control register.
    */
-  reg = TIVA_CANIF_CMSK_WRNRD | TIVA_CANIF_CMSK_ARB
-        | TIVA_CANIF_CMSK_CLRINTPND | TIVA_CANIF_CMSK_TXRQST;
+  reg = TIVA_CANIF_CMSK_WRNRD | TIVA_CANIF_CMSK_ARB | TIVA_CANIF_CMSK_CONTROL
+        | TIVA_CANIF_CMSK_CLRINTPND | TIVA_CANIF_CMSK_TXRQST
+        | TIVA_CANIF_CMSK_DATAA | TIVA_CANIF_CMSK_DATAB;
   putreg32(reg, canmod->thd_iface_base + TIVA_CANIF_OFFSET_CMSK);
   
   /* Arbitration registers (ARB1 and ARB2) */
@@ -995,8 +1000,23 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
            * configured? should such a thing be supported?
            */
           
-          /* Read CANSTS to clear the interrupt */
-          getreg32(canmod->base + TIVA_CAN_OFFSET_STS);
+          /* Note: the TM4C123GH6PM incorrectly states "A message interrupt is
+           * cleared by clearing the message object's INTPND bit in the
+           * CANIFnMCTL register or by reading the CAN Status (CANSTS)
+           * register."
+           * 
+           * In fact, a message interrupt can only be cleared via the MCTL
+           * register.
+           */
+          putreg32(TIVA_CANIF_CMSK_CLRINTPND,
+                   canmod->isr_iface_base + TIVA_CANIF_OFFSET_CMSK);
+          putreg32(TIVA_CAN_TX_MBOX_NUM,
+                   canmod->isr_iface_base + TIVA_CANIF_OFFSET_CRQ);
+          
+          /* Wait for request to be processed */
+          while (getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_CRQ)
+                  & TIVA_CANIF_CRQ_BUSY);
+          
           can_txdone(dev);
         }
       
@@ -1344,8 +1364,12 @@ static void tivacan_free_fifo(FAR struct can_dev_s *dev,
         {
           /* Wait for pending transmisions or reads to complete */
           
-          while ((TIVA_CAN_TXRQ1(modnum) | TIVA_CAN_TXRQ2(modnum) << 16
-                  | TIVA_CAN_NWDA1(modnum) | TIVA_CAN_NWDA2(modnum) << 16)
+          while ((tivacan_readsplitreg32(canmod->base,
+                                          TIVA_CAN_OFFSET_TXRQ1,
+                                          TIVA_CAN_OFFSET_TXRQ2)
+                | tivacan_readsplitreg32(canmod->base,
+                                          TIVA_CAN_OFFSET_NWDA1,
+                                          TIVA_CAN_OFFSET_NWDA2))
                   & 1 << i);
           
           tivacan_disable_msg_obj(canmod->thd_iface_base, i);
