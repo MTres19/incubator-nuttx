@@ -12,7 +12,7 @@
  * The TivaWare sample code has a BSD compatible license that requires this
  * copyright notice:
  *
- * Copyright (c) 2005-2014 Texas Instruments Incorporated.
+ * Copyright (c) 2005-2020 Texas Instruments Incorporated.
  * All rights reserved.
  * Software License Agreement
  *
@@ -188,8 +188,8 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev);
 /* Internal utility functions */
 
 static struct tiva_can_timing_s tivacan_bittiming_get(FAR struct can_dev_s *dev);
-static void tivacan_bittiming_set(FAR struct tiva_can_timing_s *timing,
-                                  FAR struct can_dev_s *dev);
+static void tivacan_bittiming_set(FAR struct can_dev_s *dev,
+                                  FAR struct tiva_can_timing_s *timing);
 
 static struct tiva_can_fifo_s  *tivacan_alloc_fifo(FAR struct can_dev_s *dev,
                                                     int depth);
@@ -377,7 +377,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
   getreg32(canmod->base + TIVA_CAN_OFFSET_STS);
   
   /* Set default bit timing */
-  tivacan_bittiming_set(&default_timing, dev);
+  tivacan_bittiming_set(dev, &default_timing);
   
   nxmutex_lock(&canmod->thd_iface_mtx);
   
@@ -560,7 +560,111 @@ static void tivacan_txintctl(FAR struct can_dev_s *dev, bool enable)
 
 static int tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
 {
+  FAR struct tiva_canmod_s *canmod = dev->cd_priv;
+  int ret;
   
+  switch (cmd)
+    {
+      case CANIOC_GET_BITTIMING:
+      {
+        FAR struct canioc_bittiming_s *bt = arg;
+        struct tiva_can_timing_s timing;
+        
+        timing = tivacan_bittiming_get(dev);
+        bt->bt_tseg1 = timing.tseg1;
+        bt->bt_tseg2 = timing.tseg2;
+        bt->bt_sjw   = timing.sjw;
+        bt->bt_baud  = (SYSCLK_FREQUENCY / timing.prescaler)
+                        / (timing.tseg1 + timing.tseg2);
+        ret = OK;
+      }
+      break;
+      
+      case CANIOC_SET_BITTIMING:
+        {
+          /* TODO: This is VERY crude--there's no guarantees that rounding
+           * won't cause problems with the prescaler selection.
+           * However, NuttX's interface here is kinda sub-optimal anyway--
+           * the choice of TSEG1, TSEG2, and SJW depend on the system clock
+           * and the prescaler value, so there should be an ioctl for
+           * the driver to take physical parameters like delay time and
+           * crystal frequency tolerances into account and calculate the
+           * timing parameters automagically... This could be implemented
+           * in the upper half driver.
+           */
+          FAR const struct canioc_bittiming_s *bt = arg;
+          struct tiva_can_timing_s timing;
+          
+          timing.tseg1 = bt->bt_tseg1;
+          timing.tseg2 = bt->bt_tseg2;
+          timing.sjw   = bt->bt_sjw;
+          timing.prescaler = SYSCLK_FREQUENCY
+                             / (bt->bt_baud * (bt->bt_tseg1 + bt->bt_tseg2));
+          DEBUGASSERT(timing.tseg1 <= 16 && timing.tseg1 >= 1);
+          DEBUGASSERT(timing.tseg2 <= 8 && timing.tseg1 >= 1);
+          DEBUGASSERT(timing.sjw <= 4 && timing.sjw >= 1);
+          DEBUGASSERT(timing.prescaler <= 1024 && timing.prescaler >= 1);
+          
+          tivacan_bittiming_set(dev, &timing);
+          ret = OK;
+        }
+        break;
+      
+      case CANIOC_GET_CONNMODES:
+        {
+          ret = -ENOSYS;
+        }
+        break;
+      
+      case CANIOC_SET_CONNMODES:
+        {
+          ret = -ENOSYS;
+        }
+        break;
+      
+      case CANIOC_ADD_EXTFILTER:
+        {
+          ret = -ENOSYS;
+        }
+        break;
+      
+      case CANIOC_DEL_EXTFILTER:
+        {
+          ret = -ENOSYS;
+        }
+        break;
+      
+      case CANIOC_ADD_STDFILTER:
+        {
+          ret = -ENOSYS;
+        }
+        break;
+      
+      case CANIOC_DEL_STDFILTER:
+        {
+          ret = -ENOSYS;
+        }
+        break;
+      
+      case CANIOC_SET_NART:
+        {
+          ret = -ENOSYS;
+        }
+        break;
+      
+      case CANIOC_SET_ABOM:
+        {
+          ret = -ENOSYS;
+        }
+        break;
+      
+      default:
+        canerr("ERROR: Unrecognized ioctl\n");
+        ret = -ENOSYS;
+        break;
+    }
+  
+  return ret;
 }
 
 /****************************************************************************
@@ -1187,15 +1291,15 @@ static struct tiva_can_timing_s tivacan_bittiming_get(FAR struct can_dev_s *dev)
  *   This is a driver-internal utility function.
  * 
  * Input parameters:
+ *   dev - An instance of the "upper half" CAN driver structure
  *   timing - An instance of tiva_can_timing_s, with the prescaler, TSEG1,
  *            TSEG2, and SJW set to their real (not off-by-one) values.
- *   dev - An instance of the "upper half" CAN driver structure
  * 
  * Returned value: None
  ****************************************************************************/
 
-static void tivacan_bittiming_set(FAR struct tiva_can_timing_s *timing,
-                                  FAR struct can_dev_s *dev)
+static void tivacan_bittiming_set(FAR struct can_dev_s *dev,
+                                  FAR struct tiva_can_timing_s *timing)
 {
   irqstate_t flags;
   uint32_t    canbit;
@@ -1667,53 +1771,27 @@ int tiva_can_initialize(FAR char *devpath, int modnum)
   int ret;
   caninfo("tiva_can_initialize module %d\n", modnum);
   
-#ifndef CONFIG_TIVA_CAN0
+#ifdef CONFIG_TIVA_CAN0
   if (modnum == 0)
     {
-      return -ENODEV;
+      dev = &g_tivacan0dev;
     }
-#endif
-#ifndef CONFIG_TIVA_CAN1
-  if (modnum == 1)
+#else
+  if (modnum == 0)
     {
       return -ENODEV;
     }
 #endif
 
-  tiva_can_enableclk(modnum);
-  
-#ifdef CONFIG_TIVA_CAN0
-  if (modnum == 0)
-    {
-      dev = &g_tivacan0dev;
-      ret = tiva_configgpio(GPIO_CAN0_RX);
-      if (ret < 0)
-        {
-          goto configgpio_error;
-        }
-      
-      ret = tiva_configgpio(GPIO_CAN0_TX);
-      if (ret < 0)
-        {
-          goto configgpio_error;
-        }
-    }
-#endif
 #ifdef CONFIG_TIVA_CAN1
   if (modnum == 1)
     {
       dev = &g_tivacan1dev;
-      ret = tiva_configgpio(GPIO_CAN1_RX);
-      if (ret < 0)
-        {
-          goto configgpio_error;
-        }
-      
-      ret = tiva_configgpio(GPIO_CAN1_TX);
-      if (ret < 0)
-        {
-          goto configgpio_error;
-        }
+    }
+#else
+  if (modnum == 1)
+    {
+      return -ENODEV;
     }
 #endif
   
@@ -1743,10 +1821,6 @@ int tiva_can_initialize(FAR char *devpath, int modnum)
       canerr("ERROR: can_register failed: %d\n", ret);
     }
   
-  return ret;
-  
-configgpio_error:
-  canerr("ERROR: failed to configure CAN GPIO pin.\n");
   return ret;
 }
 

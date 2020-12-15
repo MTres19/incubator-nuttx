@@ -1,8 +1,8 @@
 /****************************************************************************
  * arch/arm/src/tiva/tiva_can.h
  *
- *   Copyright (C) 2015 TRD2 Inc. All rights reserved.
- *   Author: Calvin Maguranis <calvin.maguranis@trd2inc.com>
+ *   Copyright (C) 2020 Matthew Trescott
+ *   Author: Matthew Trescott <matthewtrescott@gmail.com>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions

@@ -78,6 +78,22 @@ int tm4c_can_setup(void)
   int ret;
 
 #  ifdef CONFIG_TIVA_CAN0
+  tiva_can_enableclk(0);
+  
+  ret = tiva_configgpio(GPIO_CAN0_RX);
+  
+  if (ret < 0)
+    {
+      goto configgpio_error;
+    }
+  
+  ret = tiva_configgpio(GPIO_CAN0_TX);
+  
+  if (ret < 0)
+    {
+      goto configgpio_error;
+    }
+  
   /* Call tiva_can_initialize() to get an instance of CAN interface 0
    * and register it.
    */
@@ -91,6 +107,22 @@ int tm4c_can_setup(void)
 #  endif /* CONFIG_TIVA_CAN0 */
 
 #  ifdef CONFIG_TIVA_CAN1
+  tiva_can_enableclk(1);
+  
+  ret = tiva_configgpio(GPIO_CAN1_RX);
+  
+  if (ret < 0)
+    {
+      goto configgpio_error;
+    }
+  
+  ret = tiva_configgpio(GPIO_CAN1_TX);
+  
+  if (ret < 0)
+    {
+      goto configgpio_error;
+    }
+  
   /* Call tiva_can_initialize() to get an instance of CAN interface 1
    * and register it.
    */
@@ -104,6 +136,10 @@ int tm4c_can_setup(void)
 #  endif /* CONFIG_TIVA_CAN1 */
 
   return OK;
+  
+configgpio_error:
+  canerr("ERROR: failed to configure CAN GPIO pin.\n");
+  return ret;
 #else
   return -ENODEV;
 #endif
