@@ -54,6 +54,10 @@
 #include "tiva_can.h"
 #include "tm4c123g-launchpad.h"
 
+#include "tiva_enableclks.h"
+#include "tiva_gpio.h"
+#include "hardware/tiva_pinmap.h"
+
 #ifdef CONFIG_CAN
 
 /****************************************************************************
@@ -78,7 +82,7 @@ int tm4c_can_setup(void)
   int ret;
 
 #  ifdef CONFIG_TIVA_CAN0
-  tiva_can_enableclk(0);
+  tiva_can0_enableclk();
   
   ret = tiva_configgpio(GPIO_CAN0_RX);
   
@@ -107,7 +111,7 @@ int tm4c_can_setup(void)
 #  endif /* CONFIG_TIVA_CAN0 */
 
 #  ifdef CONFIG_TIVA_CAN1
-  tiva_can_enableclk(1);
+  tiva_can1_enableclk();
   
   ret = tiva_configgpio(GPIO_CAN1_RX);
   

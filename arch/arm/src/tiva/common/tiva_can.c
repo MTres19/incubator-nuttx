@@ -74,9 +74,6 @@
 #include "arm_arch.h"
 #include "chip.h"
 #include "tiva_can.h"
-#include "tiva_enableclks.h"
-#include "tiva_gpio.h"
-#include "hardware/tiva_pinmap.h"
 #include "hardware/tiva_can.h"
 
 /****************************************************************************
@@ -567,15 +564,16 @@ static int tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
     {
       case CANIOC_GET_BITTIMING:
       {
-        FAR struct canioc_bittiming_s *bt = arg;
+        FAR struct canioc_bittiming_s *bt =
+          (FAR struct canioc_bittiming_s *)arg;
         struct tiva_can_timing_s timing;
         
         timing = tivacan_bittiming_get(dev);
         bt->bt_tseg1 = timing.tseg1;
         bt->bt_tseg2 = timing.tseg2;
         bt->bt_sjw   = timing.sjw;
-        bt->bt_baud  = (SYSCLK_FREQUENCY / timing.prescaler)
-                        / (timing.tseg1 + timing.tseg2);
+        bt->bt_baud  = (SYSCLK_FREQUENCY / (unsigned long)timing.prescaler)
+                        / (timing.tseg1 + timing.tseg2 + 1);
         ret = OK;
       }
       break;
@@ -592,14 +590,15 @@ static int tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
            * timing parameters automagically... This could be implemented
            * in the upper half driver.
            */
-          FAR const struct canioc_bittiming_s *bt = arg;
+          FAR const struct canioc_bittiming_s *bt =
+            (FAR struct canioc_bittiming_s *)arg;
           struct tiva_can_timing_s timing;
           
           timing.tseg1 = bt->bt_tseg1;
           timing.tseg2 = bt->bt_tseg2;
           timing.sjw   = bt->bt_sjw;
-          timing.prescaler = SYSCLK_FREQUENCY
-                             / (bt->bt_baud * (bt->bt_tseg1 + bt->bt_tseg2));
+          timing.prescaler = SYSCLK_FREQUENCY 
+            / (bt->bt_baud * (bt->bt_tseg1 + bt->bt_tseg2 + 1));
           DEBUGASSERT(timing.tseg1 <= 16 && timing.tseg1 >= 1);
           DEBUGASSERT(timing.tseg2 <= 8 && timing.tseg1 >= 1);
           DEBUGASSERT(timing.sjw <= 4 && timing.sjw >= 1);
