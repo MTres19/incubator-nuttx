@@ -1,35 +1,21 @@
 /****************************************************************************
  * arch/arm/src/tiva/tiva_can.h
+ * Classic (character-device) lower-half driver for the Tiva CAN modules.
  *
- *   Copyright (C) 2020 Matthew Trescott
- *   Author: Matthew Trescott <matthewtrescott@gmail.com>
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions
- * are met:
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * 1. Redistributions of source code must retain the above copyright
- *    notice, this list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright
- *    notice, this list of conditions and the following disclaimer in
- *    the documentation and/or other materials provided with the
- *    distribution.
- * 3. Neither the name NuttX nor the names of its contributors may be
- *    used to endorse or promote products derived from this software
- *    without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS
- * FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
- * COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT,
- * INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING,
- * BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS
- * OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED
- * AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
- * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN
- * ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
- * POSSIBILITY OF SUCH DAMAGE.
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
  ****************************************************************************/ 
 
@@ -50,6 +36,8 @@
 #if defined(CONFIG_CAN) && (defined(CONFIG_TIVA_CAN0) || defined(CONFIG_TIVA_CAN1))
 
 /* Tiva-specific Ioctl Commands *********************************************
+ * 
+ * TODO: None of these are implemented yet.
  * 
  * CANIOC_TIVA_RXFILTER_FIFO_MAXDEPTH_GET
  *   Description:     Returns the maximum size of the filter's RX FIFO
@@ -76,41 +64,14 @@
  *                    CANIOC_ADD_EXTFILTER, with the requested FIFO depth
  *                    shifted left by 16 bits and ORed with filter ID.
  *   Returned value:  Zero on success, a negated errno on failure.
- * 
- * CANIOC_TIVA_TXFIFO_MAX_DEPTH_GET
- *   Description:     Returns the maximum size of the hardware TX FIFO
- *                    (not the actual size of the FIFO). For Tiva CAN modules,
- *                    this is based on the number of message objects allocated
- *                    to RX filter FIFOs.
- *   Argument:        Not used
- *   Returned value:  The TX FIFO's maximum size, i.e. the maximum number of
- *                    messages that can be queued for transmission in hardware.
- * 
- * CANIOC_TIVA_TXFIFO_DEPTH_GET
- *   Description:     Returns the current size of the TX FIFO.
- *   Argument:        Not used
- *   Returned value:  The current depth of the TX FIFO, i.e. the number of
- *                    messages that can be queued for transmission in hardware.
- * 
- * CANIOC_TIVA_TXFIFO_DEPTH_SET
- *   Description:     Set the depth of the hardware TX FIFO.
- *   Argument:        The requested TX FIFO depth
- *   Returned value:  Zero on success, a negated errno on failure.
- * 
- * CANIOC_TIVA_ENQUEUE_RTR_MESSAGE
- *   TODO
  */
 
 #define CAN_TIVA_FIRST (CAN_FIRST + CAN_NCMDS)
-#define CAN_TIVA_NCMDS 7
+#define CAN_TIVA_NCMDS 3
 
 #define CANIOC_TIVA_RXFILTER_FIFO_MAXDEPTH_GET  _CANIOC(CAN_TIVA_FIRST + 0)
 #define CANIOC_TIVA_RXFILTER_FIFO_DEPTH_GET     _CANIOC(CAN_TIVA_FIRST + 1)
 #define CANIOC_TIVA_RXFILTER_FIFO_DEPTH_SET     _CANIOC(CAN_TIVA_FIRST + 2)
-#define CANIOC_TIVA_TXFIFO_MAX_DEPTH_GET        _CANIOC(CAN_TIVA_FIRST + 3)
-#define CANIOC_TIVA_TXFIFO_DEPTH_GET            _CANIOC(CAN_TIVA_FIRST + 4)
-#define CANIOC_TIVA_TXFIFO_DEPTH_SET            _CANIOC(CAN_TIVA_FIRST + 5)
-#define CANIOC_TIVA_ENQUEUE_RTR_MESSAGE         _CANIOC(CAN_TIVA_FIRST + 6)
 
 #define CAN_TIVA_FILTER_TYPE_STD 0
 #define CAN_TIVA_FILTER_TYPE_EXT 1

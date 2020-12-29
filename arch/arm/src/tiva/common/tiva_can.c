@@ -1,53 +1,23 @@
 /****************************************************************************
  * arch/arm/src/tiva/common/tiva_can.c
+ * Classic (character-device) lower-half driver for the Tiva CAN modules.
+ * 
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.  The
+ * ASF licenses this file to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance with the
+ * License.  You may obtain a copy of the License at
  *
- *   Copyright (C) 2020 Matthew Trescott
- *   Author: Matthew Trescott <matthewtrescott@gmail.com>
+ *   http://www.apache.org/licenses/LICENSE-2.0
  *
- * References:
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS, WITHOUT
+ * WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.  See the
+ * License for the specific language governing permissions and limitations
+ * under the License.
  *
- *   TM4C123GH6PM Series Data Sheet
- *   TI Tivaware driverlib ADC sample code.
- *
- * The TivaWare sample code has a BSD compatible license that requires this
- * copyright notice:
- *
- * Copyright (c) 2005-2020 Texas Instruments Incorporated.
- * All rights reserved.
- * Software License Agreement
- *
- *   Redistribution and use in source and binary forms, with or without
- *   modification, are permitted provided that the following conditions
- *   are met:
- *
- *   Redistributions of source code must retain the above copyright
- *   notice, this list of conditions and the following disclaimer.
- *
- *   Redistributions in binary form must reproduce the above copyright
- *   notice, this list of conditions and the following disclaimer in the
- *   documentation and/or other materials provided with the
- *   distribution.
- *
- *   Neither the name of Texas Instruments Incorporated nor the names of
- *   its contributors may be used to endorse or promote products derived
- *   from this software without specific prior written permission.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS
- * "AS IS" AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT
- * LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR
- * A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT
- * OWNER OR CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
- * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT
- * LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE,
- * DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY
- * THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
- * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- * This is part of revision 2.1.0.12573 of the Tiva Peripheral Driver
- * Library.
- *
- ****************************************************************************/ 
+ ****************************************************************************/
 
 /****************************************************************************
  * Included Files
@@ -81,7 +51,6 @@
  ****************************************************************************/
 
 #if defined(CONFIG_TIVA_CAN) && (defined(CONFIG_TIVA_CAN0) || defined(CONFIG_TIVA_CAN1))
-
 
 /* Convenience macro for combining two 16-bit registers into a single 32 bit
  * value
@@ -287,7 +256,8 @@ static void tivacan_reset(FAR struct can_dev_s *dev)
 #endif
   if (modnum > 1)
     {
-      canerr("ERROR: tried to reset nonexistant module CAN%d\n", canmod->modnum);
+      canerr("ERROR: tried to reset nonexistant module CAN%d\n",
+             canmod->modnum);
     }
   
   modifyreg32(TIVA_SYSCON_SRCAN, 0, SYSCON_SRCAN(modnum));
@@ -987,7 +957,8 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
            * just be a BIT0 error (since the CAN module sets this error for
            * every 11 sequential recessive bits seen during bus-off recovery.)
            */
-          else if (! (cansts & TIVA_CAN_STS_BOFF) && canmod->status & TIVA_CAN_STS_BOFF)
+          else if (! (cansts & TIVA_CAN_STS_BOFF)
+                      && canmod->status & TIVA_CAN_STS_BOFF)
             {
               msg.cm_hdr.ch_id = CAN_ERROR_RESTARTED;
             }
@@ -1047,8 +1018,8 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
               msg.cm_hdr.ch_id |= CAN_ERROR_RESTARTED;
             }
           
-          /* This is not a bus-off event, or it is a brand-new bus-off event that
-           * we need to indicate the cause of the error for.
+          /* This is not a bus-off event, or it is a brand-new bus-off event
+           * that we need to indicate the cause of the error for.
            */
           switch (canmod->status & TIVA_CAN_STS_LEC_MASK)
           {
@@ -1240,8 +1211,9 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
                   msg.cm_hdr.ch_id = (reg & TIVA_CANIF_ARB2_ID_EXT_MASK)
                                           << TIVA_CANIF_ARB2_ID_EXT_PRESHIFT;
                   
-                  /* ARB1 - lower chunk of the message ID for extended IDs only */
-                  reg = getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_ARB1);
+                  /* ARB1 - lower chunk of the message ID for extended IDs */
+                  reg = getreg32(canmod->isr_iface_base
+                                  + TIVA_CANIF_OFFSET_ARB1);
                   
                   msg.cm_hdr.ch_id |= reg & TIVA_CANIF_ARB1_ID_EXT_MASK;
                 }
@@ -1675,8 +1647,9 @@ static int  tivacan_initfilter(FAR struct can_dev_s       *dev,
            * bits. Clear any interrupts (which might be spurious due to
            * the hardware being uninitialized
            */
-          reg = TIVA_CANIF_CMSK_WRNRD | TIVA_CANIF_CMSK_MASK | TIVA_CANIF_CMSK_CONTROL
-                | TIVA_CANIF_CMSK_ARB | TIVA_CANIF_CMSK_CLRINTPND;
+          reg =   TIVA_CANIF_CMSK_WRNRD     | TIVA_CANIF_CMSK_MASK
+                | TIVA_CANIF_CMSK_CONTROL   | TIVA_CANIF_CMSK_ARB
+                | TIVA_CANIF_CMSK_CLRINTPND;
           putreg32(reg, iface_base + TIVA_CANIF_OFFSET_CMSK);
           
           /* Mask 1 Register - lower 16 bits of extended ID mask */
@@ -1762,7 +1735,8 @@ static int  tivacan_initfilter(FAR struct can_dev_s       *dev,
            * hardware
            */
           putreg32(i + 1, iface_base + TIVA_CANIF_OFFSET_CRQ);
-          while (getreg32(iface_base + TIVA_CANIF_OFFSET_CRQ) & TIVA_CANIF_CRQ_BUSY);
+          while (getreg32(iface_base + TIVA_CANIF_OFFSET_CRQ)
+                                        & TIVA_CANIF_CRQ_BUSY);
         }
     }
   
