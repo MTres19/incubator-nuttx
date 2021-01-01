@@ -1199,10 +1199,9 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
                */
               reg = getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_ARB2);
               
-              /* TODO: is this correct? On remote frames, is the DIR bit set
-               * or the RMTEN bit?
+              /* NOTE: There is no way to determine whether the RTR bit was
+               * set on a received frame.
                */
-              msg.cm_hdr.ch_rtr = (0 != (reg & TIVA_CANIF_ARB2_DIR));
               
 #ifdef CONFIG_CAN_EXTID
               msg.cm_hdr.ch_extid = (0 != (reg & TIVA_CANIF_ARB2_XTD));
@@ -1577,7 +1576,7 @@ static void tivacan_disable_msg_obj(uint32_t iface_base, int num)
  *            of type CAN_FILTER_MASK
  *   type   - One of CAN_TIVA_FILTER_TYPE_STD or CAN_TIVA_FILTER_TYPE_EXT
  * 
- * Return value:
+ * Return value: 0 on success, a negated errno on failure.
  ****************************************************************************/
 
 static int  tivacan_initfilter(FAR struct can_dev_s       *dev,
