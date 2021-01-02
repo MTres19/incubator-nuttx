@@ -55,7 +55,7 @@
 /* Convenience macro for combining two 16-bit registers into a single 32 bit
  * value
  */
-#define tivacan_readsplitreg32(base, r1, r2) ((getreg32((base) + (r1)) & 0xff) | (getreg32((base) + (r2)) << 16))
+#define tivacan_readsplitreg32(base, r1, r2) ((getreg32((base) + (r1)) & 0xffff) | (getreg32((base) + (r2)) << 16))
 
 /* Only the last mailbox is used for TX to ensure that responses to remote
  * frames we send are always collected by an RX FIFO and not by the mailbox
@@ -628,7 +628,15 @@ static int tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
       case CANIOC_DEL_EXTFILTER:
       case CANIOC_DEL_STDFILTER:
         {
-          if (arg < 0 || arg >= CONFIG_TIVA_CAN_FILTERS_MAX)
+          /* RX default fifo pointer removed when a filter is added. Do not
+           * allow filters to be "removed" before they're added. Also do not
+           * allow unusued filter FIFOs to be added.
+           */
+          if (arg < 0
+                || arg >= CONFIG_TIVA_CAN_FILTERS_MAX
+                || canmod->rxdefault_fifo != NULL
+                || canmod->fifos[arg].msg_nums == 0
+            )
             {
               ret = -EINVAL;
             }
@@ -1491,6 +1499,7 @@ int tivacan_alloc_fifo(FAR struct can_dev_s *dev, int depth)
  * 
  * Return value: None
  ****************************************************************************/
+
 static void tivacan_free_fifo(FAR struct can_dev_s *dev,
                                  FAR struct tiva_can_fifo_s *fifo)
 {
@@ -1512,6 +1521,8 @@ static void tivacan_free_fifo(FAR struct can_dev_s *dev,
                   & 1 << i);
           
           tivacan_disable_msg_obj(canmod->thd_iface_base, i);
+          
+          fifo->msg_nums &= ~(1 << i);
         }
     }
   
