@@ -66,7 +66,7 @@
 
 /* Note: driver code uses a 32-bit bitmask to represent the message objects */
 
-#define TIVA_CAN_NUM_MSG_OBJS      32           /* Number of slots in the message SRAM */
+#define TIVA_CAN_NUM_MBOXES      32             /* Number of slots in the message SRAM */
 
 
 /****************************************************************************

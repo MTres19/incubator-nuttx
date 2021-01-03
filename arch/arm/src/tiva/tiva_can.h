@@ -42,9 +42,8 @@
  * CANIOC_TIVA_RXFILTER_FIFO_MAXDEPTH_GET
  *   Description:     Returns the maximum size of the filter's RX FIFO
  *                    (not the actual size of the FIFO). For Tiva CAN
- *                    modules, this is based on the number of message
- *                    objects allocated to the TX FIFO and the other RX
- *                    filter FIFOs.
+ *                    modules, this is based on the number of mailboxes
+ *                    allocated to the other RX filter FIFOs.
  *   Argument:        The filter ID returned by CANIOC_ADD_STDFILTER or
  *                    CANIOC_ADD_EXTFILTER
  *   Returned value:  The filter's maximum possible filter depth, based
