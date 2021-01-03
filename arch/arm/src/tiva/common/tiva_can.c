@@ -57,10 +57,10 @@
  */
 #define tivacan_readsplitreg32(base, r1, r2) ((getreg32((base) + (r1)) & 0xffff) | (getreg32((base) + (r2)) << 16))
 
-/* Only the last mailbox is used for TX to ensure that responses to remote
- * frames we send are always collected by an RX FIFO and not by the mailbox
- * used to send the remote frame. (The Tiva hardware uses the mailbox with
- * the lowest number first.)
+/* Only the last mailbox is used for TX to help ensure that responses to
+ * remote request frames we send are always collected by an RX FIFO and not
+ * by the mailbox used to send the remote frame. (The Tiva hardware uses the
+ * the mailbox with the lowest number first.)
  */
 #define TIVA_CAN_TX_MBOX_MASK 0x80000000
 #define TIVA_CAN_TX_MBOX_NUM  32
@@ -69,18 +69,14 @@
  * Private Types
  ****************************************************************************/
 
-struct tiva_can_fifo_s
-{
-  /* Bitfield representing the message objects belonging to this FIFO. The
-   * high bit (mask: 1 << 31) corresponds to message object 31, the low bit
-   * (mask: 1 << 0) corresponds to message object 0.
-   * 
-   * NOTE: If a new chip came along with more message objects, this would
-   * need to be reworked.
-   */
-  uint32_t  msg_nums;
-};
-  
+/* Bitfield representing the mailboxes belonging to this FIFO. The
+* high bit (mask: 1 << 31) corresponds to mailbox 31, the low bit
+ * (mask: 1 << 0) corresponds to mailbox 0.
+ * 
+ * NOTE: If a new chip came along with more mailboxes, this would
+ * need to be reworked.
+ */
+typedef uint32_t tiva_can_fifo_t;
 
 /* This structure represents a CAN module on the microcontroller */
 
@@ -98,17 +94,17 @@ struct tiva_canmod_s
   
   /* RX filter FIFOs */
   mutex_t   fifo_mtx;
-  struct tiva_can_fifo_s fifos[CONFIG_TIVA_CAN_FILTERS_MAX];
+  tiva_can_fifo_t fifos[CONFIG_TIVA_CAN_FILTERS_MAX];
   
   /* Pointer to default FIFO initialized by the driver. Only software FIFOs
    * are used for TX because the hardware does not support arbitration on
    * outbound messages and this driver wants to be portable to the SocketCAN
    * model which (I think) performs software arbitration.
    * 
-   * The driver is hardcoded to use message object 1 (or zero, depending on
-   * how you look at it) for TX.
+   * This driver uses mailbox 32 (or 31, depending on how you look at it)
+   * for TX. (See TIVA_CAN_TX_MBOX_NUM)
    */
-  FAR struct tiva_can_fifo_s *rxdefault_fifo;
+  FAR tiva_can_fifo_t *rxdefault_fifo;
 };
 
 /* This structure represents the CAN bit timing parameters */
@@ -134,7 +130,6 @@ static void tivacan_shutdown(FAR struct can_dev_s *dev);
 static void tivacan_rxintctl(FAR struct can_dev_s *dev, bool enable);
 static void tivacan_txintctl(FAR struct can_dev_s *dev, bool enable);
 static int  tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg);
-static int  tivacan_remoterequest(FAR struct can_dev_s *dev, uint16_t id);
 static int  tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg);
 static bool tivacan_txready(FAR struct can_dev_s *dev);
 static bool tivacan_txempty(FAR struct can_dev_s *dev);
@@ -151,12 +146,12 @@ static void tivacan_bittiming_set(FAR struct can_dev_s *dev,
 
 int tivacan_alloc_fifo(FAR struct can_dev_s *dev, int depth);
 static void tivacan_free_fifo(FAR struct can_dev_s *dev,
-                                 FAR struct tiva_can_fifo_s *fifo);
-static void tivacan_disable_msg_obj(uint32_t iface_base, int num);
-static int  tivacan_initfilter(FAR struct can_dev_s          *dev,
-                               FAR struct tiva_can_fifo_s    *fifo,
-                               FAR void                      *filter,
-                               int                            type);
+                              FAR tiva_can_fifo_t *fifo);
+static void tivacan_disable_mbox(uint32_t iface_base, int num);
+static int  tivacan_initfilter(FAR struct can_dev_s       *dev,
+                               FAR tiva_can_fifo_t        *fifo,
+                               FAR void                   *filter,
+                               int                         type);
 
 /****************************************************************************
  * Private Data
@@ -172,7 +167,7 @@ static const struct can_ops_s g_tivacanops =
   .co_rxint         = tivacan_rxintctl,
   .co_txint         = tivacan_txintctl,
   .co_ioctl         = tivacan_ioctl,
-  .co_remoterequest = tivacan_remoterequest,
+  .co_remoterequest = NULL,               /* Use CONFIG_CAN_USE_RTR instead */
   .co_send          = tivacan_send,
   .co_txready       = tivacan_txready,
   .co_txempty       = tivacan_txempty,
@@ -295,6 +290,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
 {
   uint32_t  irq;
   int       ret;
+  uint32_t  reg;
   FAR struct tiva_canmod_s    *canmod = dev->cd_priv;
   
 #ifdef CONFIG_CAN_EXTID
@@ -334,11 +330,58 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
   
   nxmutex_lock(&canmod->thd_iface_mtx);
   
-  /* Disable all message objects */
-  for (int i = 0; i < TIVA_CAN_NUM_MSG_OBJS; ++i)
+  /* Disable all mailboxes */
+  for (int i = 0; i < TIVA_CAN_NUM_MBOXES; ++i)
     {
-      tivacan_disable_msg_obj(canmod->thd_iface_base, i);
+      tivacan_disable_mbox(canmod->thd_iface_base, i);
     }
+  
+  /* Ensure the TX mailbox has filtering enabled. Since mailbox
+   * 32 is the lowest-priority for receiving messages, this is might not be
+   * necessary - if the message matches an existing filter FIFO, the hardware
+   * _shouldn't_ let it "fall through" to the next mailbox if the
+   * End of Buffer bit is set (which tivacan_initfilter guarantees). However,
+   * the datasheet does not explicitly guarantee this.
+   * 
+   * The other case to be considered is if the incoming message doesn't match
+   * any of the mailboxes in the existing filter FIFOs. In this case it could
+   * fall through to the TX mailbox. The datasheet doesn't specify what
+   * happens if an incoming message matches a mailbox with TXRQST set. It
+   * is possible that the message would overwrite the contents of the TX
+   * mailbox, which would be very bad.
+   * 
+   * There are two parts to the filtering rules:
+   *  - MDIR: filter-on-direction. This prevents received messages (of any
+   *          type - RTR or normal data messages) from matching the TX
+   *          mailbox whenever we're transmitting a data frame
+   *          (i.e. ARB2.DIR = 1)
+   * 
+   *  - ID filtering: Since MDIR does not protect the TX mailbox when a
+   *                  remote request frame is being transmitted
+   *                  (ARB2.DIR = 0), we require an exact match of the ID
+   *                  and ID type (i.e. standard/extended) to limit the
+   *                  likelihood of the remote request being corrupted before
+   *                  transmission. Since remote requests contain no data,
+   *                  the only thing that would be changed by a received
+   *                  message would be the DLC.
+   * 
+   * The MCTL.UMASK bit is set in tivacan_send.
+   */
+  reg = TIVA_CANIF_MSK1_IDMSK_EXT_MASK;
+  putreg32(reg, canmod->thd_iface_base + TIVA_CANIF_OFFSET_MSK1);
+  reg = TIVA_CANIF_MSK2_IDMSK_EXT_MASK
+        | TIVA_CANIF_MSK2_MDIR
+        | TIVA_CANIF_MSK2_MXTD;
+  putreg32(reg, canmod->thd_iface_base + TIVA_CANIF_OFFSET_MSK2);
+  
+  putreg32(TIVA_CANIF_CMSK_MASK,
+           canmod->thd_iface_base + TIVA_CANIF_OFFSET_CMSK);
+  putreg32(TIVA_CAN_TX_MBOX_NUM,
+           canmod->thd_iface_base + TIVA_CANIF_OFFSET_CRQ);
+  
+  /* Wait for request to process */
+  while (getreg32(canmod->thd_iface_base + TIVA_CANIF_OFFSET_CRQ)
+          & TIVA_CANIF_CRQ_BUSY);
   
   nxmutex_unlock(&canmod->thd_iface_mtx);
   
@@ -448,7 +491,7 @@ static void tivacan_shutdown(FAR struct can_dev_s *dev)
   
   for (int i = 0; i < CONFIG_TIVA_CAN_FILTERS_MAX; ++i)
   {
-    if (canmod->fifos[i].msg_nums)
+    if (canmod->fifos[i])
     {
       tivacan_free_fifo(dev, &canmod->fifos[i]);
     }
@@ -635,7 +678,7 @@ static int tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
           if (arg < 0
                 || arg >= CONFIG_TIVA_CAN_FILTERS_MAX
                 || canmod->rxdefault_fifo != NULL
-                || canmod->fifos[arg].msg_nums == 0
+                || canmod->fifos[arg] == 0
             )
             {
               ret = -EINVAL;
@@ -704,27 +747,6 @@ static int tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
 }
 
 /****************************************************************************
- * Name: tivacan_remoterequest
- * 
- * Description:
- *   Send a remote-request frame.
- *   
- *   A pointer to this function is passed to can_register.
- * 
- * Input parameters:
- *   dev - An instance of the "upper half" CAN driver structure
- *   id - CAN message ID
- * 
- * Returned value;
- *   Zero on success; a negated errno on failure.
- ****************************************************************************/
-
-static int tivacan_remoterequest(FAR struct can_dev_s *dev, uint16_t id)
-{
-  
-}
-
-/****************************************************************************
  * Name: tivacan_send
  * 
  * Description:
@@ -739,7 +761,7 @@ static int tivacan_remoterequest(FAR struct can_dev_s *dev, uint16_t id)
  * 
  * Returned value:
  *   Zero on success; a negated errorno on failure.
- */
+ ****************************************************************************/
 
 static int tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
 {
@@ -753,7 +775,7 @@ static int tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
   
   if (!tivacan_txempty(dev))
     {
-      canerr("Cannot send message—TX mailbox in use.\n");
+      canerr("Cannot send message - TX mailbox in use.\n");
       return -EBUSY;
     }
     
@@ -809,6 +831,9 @@ static int tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
   /* Message Control (MCTL) register */
   
   reg = msg->cm_hdr.ch_dlc & TIVA_CANIF_MCTL_DLC_MASK;
+  
+  /* Protect the mailbox from rx messages; see comment in tivacan_setup */
+  reg |= TIVA_CANIF_MCTL_UMASK;
   
   /* NOTE: Not sure whether the End Of Buffer bit means anything here */
   reg |= TIVA_CANIF_MCTL_NEWDAT | TIVA_CANIF_MCTL_TXIE
@@ -897,7 +922,7 @@ static bool tivacan_txempty(FAR struct can_dev_s *dev)
  *   
  *   This ISR is registered in tivacan_setup.
  * 
- * Returned value: None
+ * Returned value: Zero on success, negated errno if an error is encountered.
  ****************************************************************************/
 
 static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
@@ -907,6 +932,7 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
   uint32_t cansts;
   uint32_t canerr;
   uint32_t canint;
+  int      ret = OK;
   
 #ifdef CONFIG_CAN_ERRORS
   int      errcnt;
@@ -1151,6 +1177,7 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
            */
           putreg32(TIVA_CANIF_CMSK_CLRINTPND,
                    canmod->isr_iface_base + TIVA_CANIF_OFFSET_CMSK);
+          
           putreg32(TIVA_CAN_TX_MBOX_NUM,
                    canmod->isr_iface_base + TIVA_CANIF_OFFSET_CRQ);
           
@@ -1174,7 +1201,7 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
            * CANINT is off-by-one (mailboxes 1-32 instead of 0-31)
            */
           
-          for (int i = canint - 1; i < TIVA_CAN_NUM_MSG_OBJS; ++i)
+          for (int i = canint - 1; i < TIVA_CAN_NUM_MBOXES; ++i)
             {
               uint32_t reg;
               
@@ -1241,6 +1268,7 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
               if (! (reg & TIVA_CANIF_MCTL_NEWDAT))
                 {
                   canerr("ISR called on RX mailbox but no new data!\n");
+                  ret = -EIO;
                 }
               
               /* Data registers - these are little endian but the uint8_t
@@ -1267,7 +1295,7 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
         }
     } /* while CANINT reg != 0*/
     
-    return OK;
+    return ret;
 }
 
 
@@ -1416,17 +1444,17 @@ static void tivacan_bittiming_set(FAR struct can_dev_s *dev,
  *   dev - An instance of the "upper half" CAN driver structure
  *   depth - The desired FIFO depth to allocate
  * 
- * Return value: The index of a tiva_can_fifo_s in dev->cd_priv (tiva_canmod_s),
- *               which contains a bit-field of the message objects that may be
+ * Return value: The index of a tiva_can_fifo_t in dev->cd_priv which
+ *               contains a bit-field of the mailboxes that may be
  *               used, -ENOSPC if there is not enough room in the CAN module
- *               SRAM (i.e. too many FIFOs already allocated), or -ENOANO if
+ *               SRAM (i.e. too many FIFOs already allocated), or -ENOMEM if
  *               the limit CONFIG_TIVA_CAN_FILTERS_MAX has been reached.
  ****************************************************************************/
 
 int tivacan_alloc_fifo(FAR struct can_dev_s *dev, int depth)
 {
-  /* Mailbox 1 (aka 0) is always claimed for TX */
-  uint32_t claimed = TIVA_CAN_TX_MBOX_MASK;
+  /* Mailbox 32 (aka 31) is always claimed for TX */
+  tiva_can_fifo_t claimed = TIVA_CAN_TX_MBOX_MASK;
   int i;
   int numclaimed = 0;
   int free_fifo_idx = -1;
@@ -1434,28 +1462,28 @@ int tivacan_alloc_fifo(FAR struct can_dev_s *dev, int depth)
   
   nxmutex_lock(&canmod->fifo_mtx);
   
-  /* Message objects allocated other RX FIFOs */
+  /* Mailboxes allocated other RX FIFOs */
   
   for (i = 0; i < CONFIG_TIVA_CAN_FILTERS_MAX; ++i)
     {
-      if (canmod->fifos[i].msg_nums == 0)
+      if (canmod->fifos[i] == 0)
         {
           free_fifo_idx = i;
         }
       
-      claimed |= canmod->fifos[i].msg_nums;
+      claimed |= canmod->fifos[i];
     }
   
   if (free_fifo_idx < 0)
   {
     canwarn("Max number of filters allocated.\n");
-    return -ENOANO;
+    return -ENOMEM;
   }
   
-  /* Message objects that can be allocated to this FIFO */
+  /* Mailboxes that are available to be allocated to this FIFO */
   claimed = ~claimed;
   
-  for (i = 0; i < TIVA_CAN_NUM_MSG_OBJS && numclaimed < depth; ++i)
+  for (i = 0; i < TIVA_CAN_NUM_MBOXES && numclaimed < depth; ++i)
     {
       if (claimed & 1 << i)
         {
@@ -1470,12 +1498,10 @@ int tivacan_alloc_fifo(FAR struct can_dev_s *dev, int depth)
     }
   else
     {
-      /* Clear the bits for message objects we don't need to claim right now.
-       * NOTE: If a new chip came along with more than 32 message objects,
-       *       this would need to be reworked.
-       */
+      /* Clear the bits for mailboxes we aren't claiming right now. */
+      
       claimed &= 0xffffffff >> (32 - i);
-      canmod->fifos[free_fifo_idx].msg_nums = claimed;
+      canmod->fifos[free_fifo_idx] = claimed;
       
       nxmutex_unlock(&canmod->fifo_mtx);
       return free_fifo_idx;
@@ -1486,10 +1512,10 @@ int tivacan_alloc_fifo(FAR struct can_dev_s *dev, int depth)
  * Name: tivacan_free_fifo
  * 
  * Description:
- *   Disable all the message objects in the specified FIFO and make them
+ *   Disable all the mailboxes in the specified FIFO and make them
  *   available for use by another filter. This function waits for pending
  *   transmissions to complete (for the TX FIFO) or new messages to be
- *   read (for RX filter FIFOs) before disabling a message object.
+ *   read (for RX filter FIFOs) before disabling a mailbox.
  *   
  *   This is a driver-internal utility function.
  * 
@@ -1501,14 +1527,14 @@ int tivacan_alloc_fifo(FAR struct can_dev_s *dev, int depth)
  ****************************************************************************/
 
 static void tivacan_free_fifo(FAR struct can_dev_s *dev,
-                                 FAR struct tiva_can_fifo_s *fifo)
+                                 FAR tiva_can_fifo_t *fifo)
 {
   FAR struct tiva_canmod_s * canmod = dev->cd_priv;
   nxmutex_lock(&canmod->thd_iface_mtx);
   
-  for (int i = 0; i < TIVA_CAN_NUM_MSG_OBJS; ++i)
+  for (int i = 0; i < TIVA_CAN_NUM_MBOXES; ++i)
     {
-      if (fifo->msg_nums & 1 << i)
+      if (*fifo & 1 << i)
         {
           /* Wait for pending transmisions or reads to complete */
           
@@ -1520,9 +1546,9 @@ static void tivacan_free_fifo(FAR struct can_dev_s *dev,
                                           TIVA_CAN_OFFSET_NWDA2))
                   & 1 << i);
           
-          tivacan_disable_msg_obj(canmod->thd_iface_base, i);
+          tivacan_disable_mbox(canmod->thd_iface_base, i);
           
-          fifo->msg_nums &= ~(1 << i);
+          *fifo &= ~(1 << i);
         }
     }
   
@@ -1530,47 +1556,85 @@ static void tivacan_free_fifo(FAR struct can_dev_s *dev,
 }
 
 /****************************************************************************
- * Name: tivacan_disable_msg_obj
+ * Name: tivacan_disable_mbox
  * 
  * Description:
- *   Disable a message object by clearing the MSGVAL bit. This function
- *   doesn't do any checks, it just disables it. Don't call it without
+ *   Disable a mailbox by clearing the MSGVAL bit. This function
+ *   doesn't do any checks before disabling it. Don't call it without
  *   checking whether there's a pending message in the object! It takes the
  *   raw base interface register base address, so it can be called from thread
  *   or ISR context.
+ * 
+ *   This function guarantees that the mailbox is actually disabled by
+ *   reading back the value of the register. As briefly mentioned in the
+ *   datasheet and further explained on the TI forums [1], writes to the
+ *   message RAM can be lost if the CAN peripheral is performing a
+ *   read-modify-write operation (i.e. actively receiving a CAN message).
+ * 
+ *   Yes, the thread is for the C2000 microcontrollers but the CAN peripheral
+ *   appears to be very similar. However, this approach accomplishes the same
+ *   thing and doesn't take the risk of missing a CAN message by setting the
+ *   INIT bit as suggested in the forum.
  *   
  *   This is a driver-internal utility function.
  * 
+ *   [1] https://e2e.ti.com/support/microcontrollers/c2000/f/171/t/916169
+ * 
  * Input parameters:
  *   iface_base - The interface registers base address to use
- *   num - The message object number to disable
+ *   num - The mailbox number to disable (zero-indexed)
  * 
  * Return value: none
  ****************************************************************************/
 
-static void tivacan_disable_msg_obj(uint32_t iface_base, int num)
+static void tivacan_disable_mbox(uint32_t iface_base, int num)
 {
-  /* No need to use modifyreg32 here, we have exclusive interface access */
+  uint32_t reg;
   
-  /* Signal a write (WRNRD) to the message SRAM touching the ARB registers */
-  putreg32(TIVA_CANIF_CMSK_WRNRD | TIVA_CANIF_CMSK_ARB,
-           iface_base + TIVA_CANIF_OFFSET_CMSK);
-  
-  /* Mark message object as invalid */
-  putreg32(0, iface_base + TIVA_CANIF_OFFSET_ARB2);
-  
-  /* Make sure the interface is not busy */
-  while (getreg32(iface_base + TIVA_CANIF_OFFSET_CRQ) & TIVA_CANIF_CRQ_BUSY);
-  
-  /* Submit request. Message objects are 1-indexed in hardware */
-  putreg32(num + 1, iface_base + TIVA_CANIF_OFFSET_CRQ);
+  while (true)
+    {
+      /* Read (back) the ARB2 register. Our write could have been lost if we
+       * caught the peripheral in the middle of a read-modify-write operation
+       * with a received message.
+       */
+      
+      /* Select arbitration registers in the command mask */
+      putreg32(TIVA_CANIF_CMSK_ARB, iface_base + TIVA_CANIF_OFFSET_CMSK);
+      
+      /* Submit request. Mailboxes are 1-indexed in hardware */
+      putreg32(num + 1, iface_base + TIVA_CANIF_OFFSET_CRQ);
+      
+      /* Wait for completion */
+      while (getreg32(iface_base + TIVA_CANIF_OFFSET_CRQ)
+              & TIVA_CANIF_CRQ_BUSY);
+      
+      reg = getreg32(iface_base + TIVA_CANIF_OFFSET_ARB2);
+      
+      if (!(reg & TIVA_CANIF_ARB2_MSGVAL))
+        {
+          break;
+        }
+      
+      /* Same as before, but select a write (WRNRD) */
+      putreg32(TIVA_CANIF_CMSK_WRNRD | TIVA_CANIF_CMSK_ARB,
+              iface_base + TIVA_CANIF_OFFSET_CMSK);
+      
+      /* Mark mailbox as invalid */
+      reg &= ~TIVA_CANIF_ARB2_MSGVAL;
+      putreg32(0, iface_base + TIVA_CANIF_OFFSET_ARB2);
+      
+      /* Submit request & wait for completion */
+      putreg32(num + 1, iface_base + TIVA_CANIF_OFFSET_CRQ);
+      while (getreg32(iface_base + TIVA_CANIF_OFFSET_CRQ)
+              & TIVA_CANIF_CRQ_BUSY);
+    }
 }
 
 /****************************************************************************
  * Name: tivacan_initfilter
  * 
  * Description:
- *   Initialize the message objects in the specified FIFO to store messages
+ *   Initialize the mailboxes in the specified FIFO to store messages
  *   matching the given filter. On return, the FIFO will generate interrupts
  *   on matching messages (if the CAN hardware is initialized).
  * 
@@ -1590,17 +1654,19 @@ static void tivacan_disable_msg_obj(uint32_t iface_base, int num)
  * Return value: 0 on success, a negated errno on failure.
  ****************************************************************************/
 
-static int  tivacan_initfilter(FAR struct can_dev_s       *dev,
-                               FAR struct tiva_can_fifo_s *fifo,
-                               FAR void                   *filter,
-                               int                         type)
+static int  tivacan_initfilter(FAR struct can_dev_s *dev,
+                               FAR tiva_can_fifo_t  *fifo,
+                               FAR void             *filter,
+                               int                   type)
 {
   uint32_t  reg;
   uint32_t  msgval;  /* Message valid bitfield */
-  uint32_t  newdat;  /* New data bitfield (for RX message objects) */
+  uint32_t  newdat;  /* New data bitfield (for RX mailboxes) */
   
-  /* Whether the End Of Buffer bit has been set - this is required by the Tiva
-   * hardware for some reason */
+  /* Whether the End of Buffer bit has been set - the Tiva hardware
+   * overwrites the mailbox with this bit even if there is new data in it
+   * when the FIFO is full.
+   */
   bool      eob_set     = false;
   
   FAR struct tiva_canmod_s *canmod = dev->cd_priv;
@@ -1627,10 +1693,10 @@ static int  tivacan_initfilter(FAR struct can_dev_s       *dev,
       canerr("Invalid filter type parameter.\n");
       return -EINVAL;
     }
-  
-  for (int i = TIVA_CAN_NUM_MSG_OBJS - 1; i >= 0; --i)
+
+  for (int i = TIVA_CAN_NUM_MBOXES - 1; i >= 0; --i)
     {
-      if (fifo->msg_nums & (1 << i))
+      if (*fifo & (1 << i))
         {
           int j = 0;
           
@@ -1647,8 +1713,9 @@ static int  tivacan_initfilter(FAR struct can_dev_s       *dev,
                   usleep(10);
                 }
             }
-          /* Wait in case the ISR hasn't had a chance to read the message object
-           * we're trying to overwrite. 5 iterations is arbitrary. */
+          /* Wait in case the ISR hasn't had a chance to read the mailbox
+           * we're trying to overwrite. 5 iterations is arbitrary.
+           */
           while (msgval & newdat & 1 << i && j < 5);
           
           /* Command Mask Register
@@ -1705,7 +1772,7 @@ static int  tivacan_initfilter(FAR struct can_dev_s       *dev,
 #endif
           
           /* Arbitration 2 Register - upper extended & all standard ID bits
-           * Also mark the message object as valid.
+           * Also mark the mailbox as valid.
            */
           reg = TIVA_CANIF_ARB2_MSGVAL;
           
@@ -1741,8 +1808,8 @@ static int  tivacan_initfilter(FAR struct can_dev_s       *dev,
           putreg32(reg, iface_base + TIVA_CANIF_OFFSET_MCTL);
           
           /* Request the registers be transferred to the message RAM and wait
-           * for the transfer to complete. Message objects are 1-indexed in
-           * hardware
+           * for the transfer to complete. Mailboxes are 1-indexed in
+           * hardware.
            */
           putreg32(i + 1, iface_base + TIVA_CANIF_OFFSET_CRQ);
           while (getreg32(iface_base + TIVA_CANIF_OFFSET_CRQ)
