@@ -87,6 +87,7 @@ struct tiva_canmod_s
   uint32_t  status;         /* Contents of the CANSTS reg, updated in ISR */
   uint32_t  errors;         /* Contents of the CANERR reg, updated in ISR */
   bool      autorecover;    /* Whether to autorecover from bus-off conditions */
+  int       sts_irq_cnt;    /* Number of status IRQs since last TX/RX success */
   
   mutex_t   thd_iface_mtx;  /* Mutex for threads accessing the interface registers */
   uint32_t  thd_iface_base; /* Interface registers for threads */
@@ -147,7 +148,9 @@ static void tivacan_bittiming_set(FAR struct can_dev_s *dev,
 int tivacan_alloc_fifo(FAR struct can_dev_s *dev, int depth);
 static void tivacan_free_fifo(FAR struct can_dev_s *dev,
                               FAR tiva_can_fifo_t *fifo);
-static void tivacan_disable_mbox(uint32_t iface_base, int num);
+static void tivacan_disable_mbox(FAR struct can_dev_s *dev,
+                                 uint32_t iface_base,
+                                 int num);
 static int  tivacan_initfilter(FAR struct can_dev_s       *dev,
                                FAR tiva_can_fifo_t        *fifo,
                                FAR void                   *filter,
@@ -333,7 +336,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
   /* Disable all mailboxes */
   for (int i = 0; i < TIVA_CAN_NUM_MBOXES; ++i)
     {
-      tivacan_disable_mbox(canmod->thd_iface_base, i);
+      tivacan_disable_mbox(dev, canmod->thd_iface_base, i);
     }
   
   /* Ensure the TX mailbox has filtering enabled. Since mailbox
@@ -765,6 +768,7 @@ static int tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
 
 static int tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
 {
+  /* TODO: process status register here */
   FAR struct tiva_canmod_s *canmod = dev->cd_priv;
   uint32_t reg = 0;
   
@@ -785,7 +789,7 @@ static int tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
    * previously used for a remote frame and could receive messages, causing
    * an SRAM conflict. TIVA_CAN_TX_MBOX_NUM is 1-indexed.
    */
-  tivacan_disable_mbox(dev, thd_iface_base, TIVA_CAN_TX_MBOX_NUM - 1);
+  tivacan_disable_mbox(dev, canmod->thd_iface_base, TIVA_CAN_TX_MBOX_NUM - 1);
   
   /* Command mask register */
   
@@ -932,16 +936,23 @@ void tivacan_handle_errors(FAR struct can_dev_s *dev)
 {
   uint32_t cansts;
   uint32_t canerr;
+  FAR struct tiva_canmod_s *canmod = dev->cd_priv;
+  
+#ifdef CONFIG_CAN_ERRORS
+  int      errcnt;
+  int      prev_errcnt;
+  struct can_msg_s msg;
+  
+  memset(&msg, 0, sizeof(struct can_msg_s));
+  msg.cm_hdr.ch_error = true;
+  msg.cm_hdr.ch_dlc   = CAN_ERROR_DLC;
+#endif
+  
   /* Clear the status interrupt by reading CANSTS */
   cansts = getreg32(canmod->base + TIVA_CAN_OFFSET_STS);
   
   /* Get the contents of the error counter register */
   canerr = getreg32(canmod->base + TIVA_CAN_OFFSET_ERR);
-  
-#ifdef CONFIG_CAN_ERRORS
-  msg.cm_hdr.ch_error = true;
-  msg.cm_hdr.ch_dlc   = CAN_ERROR_DLC;
-#endif
   
   /* This is a new bus-off event, include the cause of the "last straw"
    * error along with the bus-off indication error message to the app.
@@ -1174,12 +1185,9 @@ static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
   struct can_msg_s msg;
   uint32_t canint;
   int      ret = OK;
-  
-#ifdef CONFIG_CAN_ERRORS
-  int      errcnt;
-  int      prev_errcnt;
-#endif
-  
+  /* TODO: Always process errors on the first iteration, don't bother
+   * checking CANINT for a status interrupt
+   */
   while((canint = getreg32(canmod->base + TIVA_CAN_OFFSET_INT)
                                       & TIVA_CAN_INT_INTID_MASK))
     {
@@ -1588,7 +1596,7 @@ static void tivacan_free_fifo(FAR struct can_dev_s *dev,
                                           TIVA_CAN_OFFSET_NWDA2))
                   & 1 << i);
           
-          tivacan_disable_mbox(canmod->thd_iface_base, i);
+          tivacan_disable_mbox(dev, canmod->thd_iface_base, i);
           
           *fifo &= ~(1 << i);
         }
@@ -1623,6 +1631,7 @@ static void tivacan_free_fifo(FAR struct can_dev_s *dev,
  *   [1] https://e2e.ti.com/support/microcontrollers/c2000/f/171/t/916169
  * 
  * Input parameters:
+ *   dev - An instance of the "upper half" CAN driver structure
  *   iface_base - The interface registers base address to use
  *   num - The mailbox number to disable (zero-indexed)
  * 
@@ -1754,7 +1763,7 @@ static int  tivacan_initfilter(FAR struct can_dev_s *dev,
           while (msgval & newdat & 1 << i && j < 5);
           
           /* Disable the message object to prevent message SRAM conflicts */
-          tivacan_disable_mbox(thd_iface_base, i);
+          tivacan_disable_mbox(dev, canmod->thd_iface_base, i);
           
           /* Command Mask Register
            * 

@@ -1537,6 +1537,52 @@ config TIVA_CAN_FILTERS_MAX
 		filters increases the memory footprint even if the filters
 		are not used (internally, it is a statically-allocated array).
 
+config TIVA_CAN_STS_IRQ_LIMIT
+	int "Limit status interrupts after this many successive errors"
+	range 2 32767
+	default 143
+	---help---
+		When the CAN bus is continually disturbed or an electrical
+		fault has occurred, the CAN module will repeatedly
+		raise an IRQ. If CAN_ERRORS is disabled the application
+		will not be flooded with warnings, but the driver's ISR
+		will still be executed, potentially overloading the system.
+		This option avoids the problem by limiting the number of
+		status interrupts the driver will receive before turning
+		off these interrupts.
+		
+		Each time a status interrupt is received, a counter is
+		incremented. When the reaches exceeds this level, (i.e.
+		this number of status interrupts have occurred) status
+		interrupts are turned off. However, status interrupts are
+		re-enabled and the counter reset to zero in the following
+		three cases:
+		
+		(1) Successful reception or transmission of a message
+		    (regardless of configured filters; a mailbox
+		    is set up to collect all messages when status IRQs
+		    are turned off in order to detect this)
+		(2) The controller needs to be monitored for bus-off
+		    conditions, i.e. there is a pending transmission
+		    that has not yet completed, and the controller is
+		    not already recovering from a bus-off state.
+		
+		If the CAN module enters the error-passive state while
+		status interrupts are disabled, there is a possibility
+		that the application will not be notified immediately.
+		This is easily avoided by setting this value to at
+		least 127 + 15 + 1 = 143. (Error-passive is activated
+		at 128 RX errors or 16 TX errors.)
+		
+		If the CAN module recovers from bus-off while status
+		interrupts are disabled, the application will not be
+		notifed until a message is received or a transmission
+		is attempted. An application may use the ioctl
+		CANIOC_BUSOFF_RECOVERY to monitor the proceeding
+		of the recovery sequence; errno is set to
+		EINPROGRESS if recovery is ongoing and ENMFILE if
+		recovery has finished.
+
 endmenu
 
 if TIVA_ETHERNET
