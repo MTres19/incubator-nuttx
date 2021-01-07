@@ -36,10 +36,19 @@
 
 #include <nuttx/arch.h>
 #include <nuttx/irq.h>
+#include <nuttx/kthread.h>
 #include <nuttx/mutex.h>
 #include <nuttx/semaphore.h>
 
 #include <nuttx/can/can.h>
+
+/* A self-reenqueuing worker is used to report errors periodically when status
+ * interrupts are disabled due to overload.
+ */
+
+#ifdef CONFIG_CAN_ERRORS
+#include <nuttx/wqueue.h>
+#endif
 
 #include "arm_arch.h"
 #include "chip.h"
@@ -65,6 +74,24 @@
 #define TIVA_CAN_TX_MBOX_MASK 0x80000000
 #define TIVA_CAN_TX_MBOX_NUM  32
 
+/* Return values from tivacan_handle_errors */
+
+/* An error message was successfully sent to userspace */
+
+#define TIVA_CAN_ERRHANDLER_APP_READY   0x1
+
+/* A message was successfully received (CANSTS.RXOK set) */
+
+#define TIVA_CAN_ERRHANDLER_RX_SUCCESS  0x2
+
+/* A message was successfully transmitted (CANSTS.TXOK set) */
+
+#define TIVA_CAN_ERRHANDLER_TX_SUCCESS  0x4
+
+#define TIVA_CAN_ERR_HANDLER_TICKS MSEC2TICK(CONFIG_TIVA_CAN_ERR_HANDLER_PER)
+
+#define TIVA_CAN_KTHREAD_STACKSIZE 1024
+
 /****************************************************************************
  * Private Types
  ****************************************************************************/
@@ -82,16 +109,48 @@ typedef uint32_t tiva_can_fifo_t;
 
 struct tiva_canmod_s
 {
-  int       modnum;         /* Module number, mostly for syscon register fields */
-  uint32_t  base;           /* Registers base address */
-  uint32_t  status;         /* Contents of the CANSTS reg, updated in ISR */
-  uint32_t  errors;         /* Contents of the CANERR reg, updated in ISR */
-  bool      autorecover;    /* Whether to autorecover from bus-off conditions */
-  int       sts_irq_cnt;    /* Number of status IRQs since last TX/RX success */
+  /* Module number, mostly for syscon register fields */
+  int       modnum;
   
-  mutex_t   thd_iface_mtx;  /* Mutex for threads accessing the interface registers */
-  uint32_t  thd_iface_base; /* Interface registers for threads */
-  uint32_t  isr_iface_base; /* Interface registers reserved for the ISR */
+  /* Registers base address */
+  uint32_t  base;
+  
+  /* Contents of the CANSTS reg the last time errors were processed. */
+  uint32_t  status;
+  
+  /* Contents of the CANERR reg the last time errors were processed. */
+  uint32_t  errors;
+  
+  /* kthread message handler waits on this; ISR posts */
+  sem_t     rxsem;
+  
+  /* Mailbox number (zero-indexed) that the kthread message handler is
+   * currently retrieving from the CAN module SRAM or in the process of
+   * sending to the application. The kthread works through messages in
+   * ascending order, so if the ISR will only post the semaphore for received
+   * messages that the kthread has already "passed by."
+   */
+  int       kthd_cur_mbox;
+  
+  /* kthread message handler thread ID */
+  int       kthd_id;
+  
+#ifdef CONFIG_CAN_ERRORS
+  /* Asynchronously report errors when status interrupts are disabled */
+  struct work_s error_worker;
+#endif
+  
+  /* Whether to autorecover from bus-off conditions */
+  bool      autorecover;
+  
+  /* Mutex for threads accessing the interface registers */
+  mutex_t   thd_iface_mtx;
+  
+  /* Interface registers base address for threads threads */
+  uint32_t  thd_iface_base;
+  
+  /* Interface registers base address reserved exclusively for the ISR */
+  uint32_t  isr_iface_base;
   
   /* RX filter FIFOs */
   mutex_t   fifo_mtx;
@@ -155,6 +214,9 @@ static int  tivacan_initfilter(FAR struct can_dev_s       *dev,
                                FAR tiva_can_fifo_t        *fifo,
                                FAR void                   *filter,
                                int                         type);
+static void tivacan_txrunmode(FAR struct can_dev_s *dev);
+static void tivacan_txwatchmode(FAR struct can_dev_s *dev);
+static int  tivacan_abom_handler(int argc, char** argv);
 
 /****************************************************************************
  * Private Data
@@ -295,6 +357,50 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
   int       ret;
   uint32_t  reg;
   FAR struct tiva_canmod_s    *canmod = dev->cd_priv;
+  char     *kthd_argv[] = { "N", ""};
+  
+  ret = nxsem_init(&canmod->rxsem, 0, 0);
+  
+  if (ret < 0)
+    {
+      return ret;
+    }
+  
+  switch (canmod->modnum)
+    {
+#ifdef CONFIG_TIVA_CAN0
+      case 0:
+        {
+          kthd_argv[0][0] = '0';
+          ret = kthread_create("Tiva CAN0", CONFIG_TIVA_CAN0_PRIO,
+                                TIVA_CAN_KTHREAD_STACKSIZE, tivacan_rxhandler,
+                                kthd_argv);
+        }
+      break;
+#endif
+#ifdef CONFIG_TIVA_CAN1
+      case 1:
+        {
+          kthd_argv[0][0] = '1';
+          ret = kthread_create("Tiva CAN1", CONFIG_TIVA_CAN1_PRIO,
+                                TIVA_CAN_KTHREAD_STACKSIZE, tivacan_rxhandler,
+                                kthd_argv);
+        }
+      break;
+#endif
+      default:
+        return -EINVAL;
+    }
+    
+  if (ret < 0)
+    {
+      canerr("tiva_can: failed to create kthread\n");
+      return ret;
+    }
+  else
+    {
+      canmod->kthd_id = ret;
+    }
   
 #ifdef CONFIG_CAN_EXTID
   struct canioc_extfilter_s default_filter =
@@ -422,9 +528,15 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
   modifyreg32(canmod->base + TIVA_CAN_OFFSET_TST, 0xffffffff, 0);
   modifyreg32(canmod->base + TIVA_CAN_OFFSET_CTL, TIVA_CAN_CTL_TEST, 0);
   
+  
+  /* TODO: Implement tivacan_txintctl and tivacan_rxintctl */
   /* Exit init mode and enable interrupts from the CAN module */
   modifyreg32(canmod->base + TIVA_CAN_OFFSET_CTL, TIVA_CAN_CTL_INIT,
-              TIVA_CAN_CTL_EIE | TIVA_CAN_CTL_SIE | TIVA_CAN_CTL_IE);
+              TIVA_CAN_CTL_EIE | TIVA_CAN_CTL_IE);
+  
+#ifdef CONFIG_CAN_ERRORS
+  modifyreg32(canmod->base + TIVA_CAN_OFFSET_CTL, 0, TIVA_CAN_CTL_SIE);
+#endif
   
   ret = tivacan_alloc_fifo(dev, CONFIG_TIVA_CAN_DEFAULT_FIFO_DEPTH);
   if (ret < 0)
@@ -507,10 +619,154 @@ static void tivacan_shutdown(FAR struct can_dev_s *dev)
   up_disable_irq(irq);
   irq_detach(irq);
   
+  /* Stop processing messages */
+  kthread_delete(canmod->kthd_id);
+  
   tivacan_reset(dev);
 }
 
-/****************************************************************************
+/*****************************************************************************
+ * Name: tivacan_rxhandler
+ * 
+ * Description: Kthread RX message handler.
+ *****************************************************************************/
+
+int tivacan_rxhandler(int argc, char** argv)
+{
+  FAR struct can_dev_s     *dev;
+  FAR struct tiva_canmod_s *canmod;
+  struct can_msg_s msg;
+  int      ret;
+  int     *mbox = &canmod->kthd_cur_mbox;
+  
+  /* Initialize to 
+  *mbox = TIVA_CAN_NUM_MBOXES;
+  
+  switch (argv[0][0])
+    {
+#ifdef CONFIG_TIVA_CAN0
+      case '0':
+        {
+          dev = &g_tivacan0dev;
+        }
+        break;
+#endif
+#ifdef CONFIG_TIVA_CAN1
+      case '1':
+        {
+          dev = &g_tivacan1dev;
+        }
+        break;
+#endif
+      default:
+        canerr("Incorrect Tiva CAN module passed to kthread.\n");
+    }
+  
+  canmod = dev->cd_priv;
+  
+  for (;;)
+    {
+      memset(&msg, 0, sizeof(struct can_msg_s));
+      
+      nxsem_wait(&canmod->rxsem);
+      nxmutex_lock(&canmod->thd_iface_mtx);
+      
+      /* Process the received message(s). Since hardware RX FIFOS are used
+       * and new messages are received into the mailbox with the lowest
+       * number, we can't use CANINT since a new message might arrive in a
+       * mailbox we'd already read from before the higher-address mailboxes in
+       * the FIFO were emptied. (Besides, the ISR clears CANINT).
+       */
+      
+      for (*mbox = 0; *mbox < TIVA_CAN_NUM_MBOXES; ++*mbox)
+        {
+          uint32_t reg;
+          
+          /* New Data registers */
+          reg = tivacan_readsplitreg32(canmod->base,
+                                       TIVA_CAN_OFFSET_NWDA1,
+                                       TIVA_CAN_OFFSET_NWDA2);
+          
+          if (!(reg & ~TIVA_CAN_TX_MBOX_MASK))
+            {
+              break;
+            }
+          else if (! (reg & 1 << *mbox))
+            {
+              continue;
+            }
+          
+          /* Command Mask register
+           * Pull arbitration bits, control bits, and data bits from the
+           * message SRAM. Clear the new data bit; the ISR cleared the IRQ.
+           */
+          reg =   TIVA_CANIF_CMSK_ARB       | TIVA_CANIF_CMSK_CONTROL
+                | TIVA_CANIF_CMSK_NEWDAT    | TIVA_CANIF_CMSK_DATAA
+                | TIVA_CANIF_CMSK_DATAB;
+          putreg32(reg, canmod->thd_iface_base + TIVA_CANIF_OFFSET_CMSK);
+          
+          /* Submit request */
+          putreg32(*mbox + 1, canmod->thd_iface_base + TIVA_CANIF_OFFSET_CRQ);
+          
+          /* Wait for response */
+          while (getreg32(canmod->thd_iface_base + TIVA_CANIF_OFFSET_CRQ)
+                                                    & TIVA_CANIF_CRQ_BUSY);
+          
+          /* ARB2 - upper chunk of the message ID, "direction," and extended
+           * message indication. (NOTE: sadly, DIR is always 0 (receive) even
+           * for RTR messages. There is no way to determine whether the RTR
+           * bit was set on a received frame.
+          */
+          reg = getreg32(canmod->thd_iface_base + TIVA_CANIF_OFFSET_ARB2);
+          
+#ifdef CONFIG_CAN_EXTID
+          msg.cm_hdr.ch_extid = (0 != (reg & TIVA_CANIF_ARB2_XTD));
+          if (msg.cm_hdr.ch_extid)
+            {
+              msg.cm_hdr.ch_id = (reg & TIVA_CANIF_ARB2_ID_EXT_MASK)
+                                      << TIVA_CANIF_ARB2_ID_EXT_PRESHIFT;
+              
+              /* ARB1 - lower chunk of the message ID for extended IDs */
+              reg = getreg32(canmod->thd_iface_base + TIVA_CANIF_OFFSET_ARB1);
+              
+              msg.cm_hdr.ch_id |= reg & TIVA_CANIF_ARB1_ID_EXT_MASK;
+            }
+          else
+            {
+              msg.cm_hdr.ch_id = (reg & TIVA_CANIF_ARB2_ID_STD_MASK)
+                                        >> TIVA_CANIF_ARB2_ID_STD_SHIFT;
+            }
+#else
+          msg.cm_hdr.ch_id = (reg & TIVA_CANIF_ARB2_ID_STD_MASK)
+                                    >> TIVA_CANIF_ARB2_ID_STD_SHIFT;
+#endif /* CONFIG_CAN_EXTID */
+          
+          /* Message Control - remote enable (RMTEN) & data length code */
+          reg = getreg32(canmod->thd_iface_base + TIVA_CANIF_OFFSET_MCTL);
+          msg.cm_hdr.ch_dlc = reg & TIVA_CANIF_MCTL_DLC_MASK;
+          
+          /* Data registers - these are little endian but the uint8_t
+           * array in can_msg_s is big endian.
+           */
+          for (int j = 0; j < (msg.cm_hdr.ch_dlc + 1) / 2; ++j)
+            {
+              reg = getreg32(canmod->thd_iface_base
+                              + TIVA_CANIF_OFFSET_DATA(j));
+              
+              msg.cm_data[j * 2]      = (reg & TIVA_CANIF_DATA_HBYTE_MASK)
+                                        >> TIVA_CANIF_DATA_HBYTE_SHIFT;
+              msg.cm_data[j * 2 + 1]  = (reg & TIVA_CANIF_DATA_LBYTE_MASK)
+                                        >> TIVA_CANIF_DATA_LBYTE_SHIFT;
+            }
+          
+          ret = can_receive(dev, &msg.cm_hdr, msg.cm_data);
+        }
+        
+        nxmutex_unlock(&canmod->thd_iface_mtx);
+    }
+}
+
+/*****************************************************************************
  * Name: tivacan_rxintctl
  * 
  * Description:
@@ -736,8 +992,21 @@ static int tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
       
       case CANIOC_SET_ABOM:
         {
-          canmod->autorecover = true;
-          ret = OK;
+          ret = kthread_create("Tiva CAN ABOM handler",
+                               TIVA_CAN_ABOM_THD_PRIO,
+                               TIVA_CAN_ABOM_THD_STACK_SZ,
+                               tivacan_abom_handler,
+                               NULL);
+          if (ret > 0)
+            {
+              canmod->abom_thd_id = ret;
+              canmod->autorecover = true;
+              ret = OK;
+            }
+          else if (ret == 0)
+            {
+              ret = -ENOMEM;
+            }
         }
         break;
       default:
@@ -922,20 +1191,73 @@ static bool tivacan_txempty(FAR struct can_dev_s *dev)
 }
 
 /*****************************************************************************
+ * Name: tivacan_handle_errors_wqueue(FAR struct can_dev_s *dev)
+ * 
+ * Description:
+ *   Periodically handle errors when status interrupts are disabled due to
+ *   overload. Only applicable when CAN error reporting is enabled.
+ * 
+ * Input parameters:
+ *   dev - An instance of the "upper half" CAN driver structure (typed as
+ *         void* for compatibility with worker_t.
+ *****************************************************************************/
+
+#ifdef CONFIG_CAN_ERRORS
+void tivacan_handle_errors_wqueue(FAR void * dev)
+{
+  FAR struct tiva_canmod_s *canmod = ((FAR struct can_dev_s *)dev)->cd_priv;
+  irqstate_t flags;
+  int ret;
+  
+  
+  flags = enter_critical_section();
+  ret = tivacan_handle_errors((FAR struct can_dev_s *)dev);
+  
+  if (ret <= 0)
+    {
+      work_queue(HPWORK,
+                canmod->error_worker,
+                tivacan_handle_errors_wqueue,
+                dev,
+                TIVA_CAN_ASYNC_ERRORS_DELAY
+      );
+    }
+  leave_critical_section(flags);
+}
+#endif /* CONFIG_CAN_ERRORS */
+
+/*****************************************************************************
  * Name: tivacan_handle_errors(FAR struct can_dev_s *dev)
  * 
  * Description:
- *   Process everything in the status register, perform bus-off recovery
- *   if desired, send error messages, etc... Can't do this solely in the ISR
- *   because we disable status interrupts when the message FIFO fills up,
- *   and need to take care of bus-off conditions at a minimum when sending
- *   messages.
+ *   Process everything in the status register; i.e. initiate bus-off
+ *   recovery and send error messages if desired.  This function may be
+ *   called from either the main ISR or, when error messages are desired but
+ *   the application is unable to handle the volume of errors, from the
+ *   high-priority work queue. However, interrupts must be disabled if
+ *   called from the work queue context to ensure that error messages are
+ *   sent to the application in the correct order.
+ * 
+ * Input parameters:
+ *   dev - An instance of the "upper half" CAN driver structure
+ * 
+ * Returned value:
+ *   A value greater than 1 indicates some kind of normal operation, even if
+ *   errors were detected. The value is an OR of TIVA_CAN_ERRORHANDLER_*
+ * 
+ *   A value of zero indicates "no change" - the function did not attempt to
+ *   send an error message to the application with can_receive and there were
+ *   no new messages successfully transmitted or received.
+ * 
+ *   The return value of can_receive (a negated errno) is returned when an
+ *   error is detected but could not be relayed to the application. 
  ****************************************************************************/
 
-void tivacan_handle_errors(FAR struct can_dev_s *dev)
+int tivacan_handle_errors(FAR struct can_dev_s *dev)
 {
   uint32_t cansts;
   uint32_t canerr;
+  int      ret = 0;
   FAR struct tiva_canmod_s *canmod = dev->cd_priv;
   
 #ifdef CONFIG_CAN_ERRORS
@@ -1126,17 +1448,10 @@ void tivacan_handle_errors(FAR struct can_dev_s *dev)
   /* If there was a good reason to send an error message, send it */
   if (msg.cm_hdr.ch_id)
     {
-      ret = can_receive(dev, &msg.cm_hdr, msg.cm_data);
-      
-      /* If we've filled the FIFO, it's time to stop bothering with
-       * status messages. We'll re-enable them next time a message is
-       * successfully received or a a TX message is attempted.
-       */
-      
-      if (ret < 0)
+      int tmp = can_receive(dev, &msg.cm_hdr, msg.cm_data);
+      if (tmp < 0)
         {
-          modreg32(TIVA_CAN_CTL_SIE, 0,
-                  canmod->base + TIVA_CAN_OFFSET_CTL);
+          ret = tmp;
         }
     }
   
@@ -1156,192 +1471,79 @@ void tivacan_handle_errors(FAR struct can_dev_s *dev)
     putreg32(cansts | TIVA_CAN_STS_LEC_NOEVENT,
                           canmod->base + TIVA_CAN_OFFSET_STS);
   }
-#else
-  if (canerr & TIVA_CAN_ERR_RP
 #endif /* CONFIG_CAN_ERRORS */
 
   /* Save contents of CANSTS and CANERR for other functions to use
    * and for comparison next time */
   canmod->status = cansts;
   canmod->errors = canerr;
+  
+  return ret;
 }
 
 /****************************************************************************
  * Name: tivacan_unified_isr
  * 
  * Description:
- *   ISR executed for all interrupts generated by the CAN module. The Tiva
- *   CAN modules don't have separate ISRs for different events, hence the
- *   name "unified."
+ *   ISR executed for all interrupts generated by the CAN module.
  *   
  *   This ISR is registered in tivacan_setup.
  * 
  * Returned value: Zero on success, negated errno if an error is encountered.
  ****************************************************************************/
 
-static int  tivacan_unified_isr(int irq, FAR void *context, FAR void *dev)
+static int  tivacan_isr(int irq, FAR void *context, FAR void *dev)
 {
   FAR struct tiva_canmod_s *canmod = ((FAR struct can_dev_s *)dev)->cd_priv;
-  struct can_msg_s msg;
   uint32_t canint;
   int      ret = OK;
-  /* TODO: Always process errors on the first iteration, don't bother
-   * checking CANINT for a status interrupt
-   */
+  
   while((canint = getreg32(canmod->base + TIVA_CAN_OFFSET_INT)
                                       & TIVA_CAN_INT_INTID_MASK))
     {
-      msg = (const struct can_msg_s){0};
-      
       if (canint == TIVA_CAN_INT_INTID_STATUS)
         {
           tivacan_handle_errors((FAR struct can_dev_s *)dev);
-          
           continue;
-        } /* if canint == TIVA_CAN_INT_INTID_STATUS */
-      
-      /* TX interrupt */
-      
-      else if (canint == TIVA_CAN_TX_MBOX_NUM)
+        }
+      else
         {
-          /* TODO: How should persistent remote responder messages be
-           * configured? should such a thing be supported?
-           */
-          
-          /* Note: the TM4C123GH6PM incorrectly states "A message interrupt is
+          /* Note: the datasheet incorrectly states "A message interrupt is
            * cleared by clearing the message object's INTPND bit in the
            * CANIFnMCTL register or by reading the CAN Status (CANSTS)
            * register."
            * 
-           * In fact, a message interrupt can only be cleared via the MCTL
-           * register.
+           * In fact, a message interrupt can only be cleared via the
+           * interface registers. Here, we use the "shortcut" in the
+           * command mask register to avoid a read-modify-write of MCTL.
            */
           putreg32(TIVA_CANIF_CMSK_CLRINTPND,
                    canmod->isr_iface_base + TIVA_CANIF_OFFSET_CMSK);
           
-          putreg32(TIVA_CAN_TX_MBOX_NUM,
-                   canmod->isr_iface_base + TIVA_CANIF_OFFSET_CRQ);
-          
-          /* Wait for request to be processed */
+          /* Submit request and wait for completion */
+          putreg32(canint, canmod->isr_iface_base + TIVA_CANIF_OFFSET_CRQ);
           while (getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_CRQ)
                   & TIVA_CANIF_CRQ_BUSY);
           
-          can_txdone(dev);
-        }
-      
-      /* RX message interrupt */
-        
-      else if (canint < TIVA_CAN_TX_MBOX_NUM)
-        {
-          /* Process the received message(s). Since hardware RX FIFOS are used
-           * and new messages are received into the mailbox with the lowest
-           * number, we can't just keep reading CANINT since a new message
-           * might arrive in a mailbox we'd already read from before the
-           * higher-address mailboxes in the FIFO were emptied.
-           * 
-           * CANINT is off-by-one (mailboxes 1-32 instead of 0-31)
-           */
-          
-          for (int i = canint - 1; i < TIVA_CAN_NUM_MBOXES; ++i)
+          if (canint == TIVA_CAN_TX_MBOX_NUM)
             {
-              uint32_t reg;
+              can_txdone(dev);
+            }
+          else
+            {
+              int sval;
+              nxsem_get_value(&canmod->rxsem, &sval);
               
-              /* Check if there's an interrupt pending for this mailbox */
-              if (! (tivacan_readsplitreg32(canmod->base,
-                    TIVA_CAN_OFFSET_MSG1INT,
-                    TIVA_CAN_OFFSET_MSG2INT) & 1 << i))
-                {
-                  continue;
-                }
-              
-              /* Command Mask register
-               * Pull arbitration bits, control bits, and data bits from the
-               * message SRAM. Clear the interrupt and the new data bit.
+              /* Unblock the message retrieval thread if blocked; signal it
+               * if it needs to loop through all the mailboxes again once
+               * it finishes its current iteration.
                */
-              reg = TIVA_CANIF_CMSK_ARB         | TIVA_CANIF_CMSK_CONTROL
-                    | TIVA_CANIF_CMSK_CLRINTPND | TIVA_CANIF_CMSK_NEWDAT
-                    | TIVA_CANIF_CMSK_DATAA     | TIVA_CANIF_CMSK_DATAB;
-              putreg32(reg, canmod->isr_iface_base + TIVA_CANIF_OFFSET_CMSK);
-              
-              /* Submit request */
-              putreg32(i + 1, canmod->isr_iface_base + TIVA_CANIF_OFFSET_CRQ);
-              
-              /* Wait for response */
-              while (getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_CRQ)
-                                                        & TIVA_CANIF_CRQ_BUSY);
-              
-              /* ARB2 - upper chunk of the message ID, direction, and extended
-               * message indication.
-               */
-              reg = getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_ARB2);
-              
-              /* NOTE: There is no way to determine whether the RTR bit was
-               * set on a received frame.
-               */
-              
-#ifdef CONFIG_CAN_EXTID
-              msg.cm_hdr.ch_extid = (0 != (reg & TIVA_CANIF_ARB2_XTD));
-              if (msg.cm_hdr.ch_extid)
+              if (sval == -1
+                  || (sval == 0 && canint - 1 < canmod->kthd_cur_mbox))
                 {
-                  msg.cm_hdr.ch_id = (reg & TIVA_CANIF_ARB2_ID_EXT_MASK)
-                                          << TIVA_CANIF_ARB2_ID_EXT_PRESHIFT;
-                  
-                  /* ARB1 - lower chunk of the message ID for extended IDs */
-                  reg = getreg32(canmod->isr_iface_base
-                                  + TIVA_CANIF_OFFSET_ARB1);
-                  
-                  msg.cm_hdr.ch_id |= reg & TIVA_CANIF_ARB1_ID_EXT_MASK;
-                }
-              else
-                {
-                  msg.cm_hdr.ch_id = (reg & TIVA_CANIF_ARB2_ID_STD_MASK)
-                                            >> TIVA_CANIF_ARB2_ID_STD_SHIFT;
-                }
-#else
-              msg.cm_hdr.ch_id = (reg & TIVA_CANIF_ARB2_ID_STD_MASK)
-                                        >> TIVA_CANIF_ARB2_ID_STD_SHIFT;
-#endif /* CONFIG_CAN_EXTID */
-              
-              /* Message Control - remote enable (RMTEN) & data length code */
-              reg = getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_MCTL);
-              msg.cm_hdr.ch_dlc = reg & TIVA_CANIF_MCTL_DLC_MASK;
-              
-              if (! (reg & TIVA_CANIF_MCTL_NEWDAT))
-                {
-                  canerr("ISR called on RX mailbox but no new data!\n");
-                  ret = -EIO;
-                }
-              
-              /* Data registers - these are little endian but the uint8_t
-               * array in can_msg_s is big endian.
-               */
-              for (int j = 0; j < (msg.cm_hdr.ch_dlc + 1) / 2; ++j)
-                {
-                  reg = getreg32(canmod->isr_iface_base
-                                  + TIVA_CANIF_OFFSET_DATA(j));
-                  
-                  msg.cm_data[j * 2]      = (reg & TIVA_CANIF_DATA_HBYTE_MASK)
-                                            >> TIVA_CANIF_DATA_HBYTE_SHIFT;
-                  msg.cm_data[j * 2 + 1]  = (reg & TIVA_CANIF_DATA_LBYTE_MASK)
-                                            >> TIVA_CANIF_DATA_LBYTE_SHIFT;
-                }
-              
-              ret = can_receive(dev, &msg.cm_hdr, msg.cm_data);
-              
-              /* Re-enable status interrupts if they were disabled due
-               * high volume. The application may be able to use them now.
-               */
-              if (ret >= 0)
-                {
-                  modreg32(TIVA_CAN_CTL_SIE, 0,
-                           canmod->base + TIVA_CAN_OFFSET_CTL);
+                  nxsem_post(&canmod->rxsem);
                 }
             }
-        }
-      else
-        {
-          /* The interrupt handler was called, but there is no interrupt...! */
-          canerr("ISR called but no interrupt given!\n");
         }
     } /* while CANINT reg != 0*/
     
