@@ -74,7 +74,7 @@
  * 
  * This number is zero-indexed, althought the Command Request Register isn't.
  */
-#define TIVA_CAN_TX_FIFO_START (TIVA_CAN_NUM_MBOXES - CONFIG_TIVA_CAN_TX_FIFO_DEPTH - 1)
+#define TIVA_CAN_TX_FIFO_START (TIVA_CAN_NUM_MBOXES - CONFIG_TIVA_CAN_TX_FIFO_DEPTH)
 
 /* Frequency of async error message reporting when rate-limited */
 #define TIVA_CAN_ERR_HANDLER_TICKS MSEC2TICK(CONFIG_TIVA_CAN_ERR_HANDLER_PER)
@@ -218,7 +218,7 @@ static int  tivacan_rxhandler(int argc, char** argv);
 #ifdef CONFIG_CAN_ERRORS
 void tivacan_handle_errors_wqueue(FAR void * dev);
 #endif
-void tivacan_handle_errors(FAR struct can_dev_s *dev);
+int tivacan_handle_errors(FAR struct can_dev_s *dev);
 
 /****************************************************************************
  * Private Data
@@ -595,6 +595,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
  * 
  * Returned value: None
  ****************************************************************************/
+
 static void tivacan_shutdown(FAR struct can_dev_s *dev)
 {
   int irq;
@@ -681,6 +682,9 @@ int tivacan_rxhandler(int argc, char** argv)
   
   canmod = dev->cd_priv;
   int     *mbox = &canmod->kthd_cur_mbox;
+  
+  /* Must clear the garbage */
+  memset(&msg, 0, sizeof(struct can_msg_s));
   
   for (;;)
     {
@@ -783,6 +787,19 @@ int tivacan_rxhandler(int argc, char** argv)
         }
         
         nxmutex_unlock(&canmod->thd_iface_mtx);
+        
+#ifdef CONFIG_CAN_ERRORS
+        if (ret == OK)
+        {
+          /* Switch to processing errors by interrupt when the application
+           * is able to keep up with the message volume and messages are
+           * being received successfully.
+           */
+          work_cancel(HPWORK, &canmod->error_work);
+          modifyreg32(canmod->base + TIVA_CAN_OFFSET_CTL,
+                      0, TIVA_CAN_CTL_SIE);
+        }
+#endif
     }
     
     return OK;
@@ -1219,6 +1236,16 @@ static bool tivacan_txempty(FAR struct can_dev_s *dev)
  * Description:
  *   Periodically handle errors when status interrupts are disabled due to
  *   overload. Only applicable when CAN error reporting is enabled.
+ *   
+ *   Since error messages are processed directly in the ISR, it is easy to
+ *   overwhelm the application with error messages. If tivacan_handle_errors
+ *   fails to send an error message in the ISR, status interrupts are
+ *   disabled and the ISR adds this function to the work queue.
+ *   
+ *   On the other hand, when a message is successfully sent, or successfully
+ *   passes through the filters and is received by the application, the ISR
+ *   or the RX kthread will call work_cancel and re-enable status interrupts
+ *   if they are disabled.
  * 
  * Input parameters:
  *   dev - An instance of the "upper half" CAN driver structure (typed as
@@ -1229,8 +1256,15 @@ static bool tivacan_txempty(FAR struct can_dev_s *dev)
 void tivacan_handle_errors_wqueue(FAR void * dev)
 {
   irqstate_t flags;
+  FAR struct tiva_canmod_s *canmod = ((FAR struct can_dev_s *)dev)->cd_priv;
+  
   flags = enter_critical_section();
   tivacan_handle_errors((FAR struct can_dev_s *)dev);
+  work_queue(HPWORK,
+             &canmod->error_work,
+             tivacan_handle_errors_wqueue,
+             dev,
+             TIVA_CAN_ERR_HANDLER_TICKS);
   leave_critical_section(flags);
 }
 #endif /* CONFIG_CAN_ERRORS */
@@ -1262,22 +1296,17 @@ void tivacan_handle_errors_wqueue(FAR void * dev)
  *   dev - An instance of the "upper half" CAN driver structure
  * 
  * Returned value:
- *   A value greater than 1 indicates some kind of normal operation, even if
- *   errors were detected. The value is an OR of TIVA_CAN_ERRORHANDLER_*
- * 
- *   A value of zero indicates "no change" - the function did not attempt to
- *   send an error message to the application with can_receive and there were
- *   no new messages successfully transmitted or received.
- * 
- *   The return value of can_receive (a negated errno) is returned when an
- *   error is detected but could not be relayed to the application. 
+ *   1 if an error message was successfully sent to the application, the
+ *   return value of can_receive() (a negated errno) if it failed, and
+ *   zero if no error message was needed.
  ****************************************************************************/
 
-void tivacan_handle_errors(FAR struct can_dev_s *dev)
+int tivacan_handle_errors(FAR struct can_dev_s *dev)
 {
   uint32_t cansts;
   uint32_t canerr;
   FAR struct tiva_canmod_s *canmod = dev->cd_priv;
+  int      ret = 0;
   
 #ifdef CONFIG_CAN_ERRORS
   int      errcnt;
@@ -1424,56 +1453,58 @@ void tivacan_handle_errors(FAR struct can_dev_s *dev)
    * (2) The application will be notified if the error goes away with an
    *     error message of type CAN_ERROR_RESTARTED.
    */
-  
-  if (msg.cm_hdr.ch_id)
-    {
-      errcnt = (canerr & (TIVA_CAN_ERR_RP | TIVA_CAN_ERR_REC_MASK))
+  errcnt = (canerr & (TIVA_CAN_ERR_RP | TIVA_CAN_ERR_REC_MASK))
+            >> TIVA_CAN_ERR_REC_SHIFT;
+  prev_errcnt = (canmod->errors
+                & (TIVA_CAN_ERR_RP | TIVA_CAN_ERR_REC_MASK))
                 >> TIVA_CAN_ERR_REC_SHIFT;
-      prev_errcnt = (canmod->errors
-                    & (TIVA_CAN_ERR_RP | TIVA_CAN_ERR_REC_MASK))
-                    >> TIVA_CAN_ERR_REC_SHIFT;
+  
+  if (errcnt >= 96)
+    {
+      if (errcnt >= 128)
+        {
+          msg.cm_data[1] |= CAN_ERROR1_RXPASSIVE;
+        }
+      else if (prev_errcnt >= 128)
+        {
+          msg.cm_hdr.ch_id |= CAN_ERROR_RESTARTED;
+        }
       
-      if (errcnt >= 96)
+      if (msg.cm_hdr.ch_id)
         {
           msg.cm_hdr.ch_id |= CAN_ERROR_CONTROLLER;
           msg.cm_data[1] |= CAN_ERROR1_RXWARNING;
-          
-          if (errcnt >= 128)
-            {
-              msg.cm_data[1] |= CAN_ERROR1_RXPASSIVE;
-            }
-          else if (prev_errcnt >= 128)
-            {
-              msg.cm_hdr.ch_id |= CAN_ERROR_RESTARTED;
-            }
         }
-      else if (prev_errcnt >= 96)
+    }
+  else if (prev_errcnt >= 96)
+    {
+      msg.cm_hdr.ch_id |= CAN_ERROR_RESTARTED;
+    }
+  
+  errcnt = (canerr & TIVA_CAN_ERR_TEC_MASK) >> TIVA_CAN_ERR_TEC_SHIFT;
+  prev_errcnt = (canmod->errors & TIVA_CAN_ERR_TEC_MASK)
+                >> TIVA_CAN_ERR_TEC_SHIFT;
+  
+  if (errcnt >= 96)
+    {
+      if (errcnt >= 128)
+        {
+          msg.cm_data[1] |= CAN_ERROR1_TXPASSIVE;
+        }
+      else if (prev_errcnt >= 128)
         {
           msg.cm_hdr.ch_id |= CAN_ERROR_RESTARTED;
         }
       
-      errcnt = (canerr & TIVA_CAN_ERR_TEC_MASK) >> TIVA_CAN_ERR_TEC_SHIFT;
-      prev_errcnt = (canmod->errors & TIVA_CAN_ERR_TEC_MASK)
-                    >> TIVA_CAN_ERR_TEC_SHIFT;
-      
-      if (errcnt >= 96)
+      if (msg.cm_hdr.ch_id)
         {
           msg.cm_hdr.ch_id |= CAN_ERROR_CONTROLLER;
           msg.cm_data[1] |= CAN_ERROR1_TXWARNING;
-          
-          if (errcnt >= 128)
-            {
-              msg.cm_data[1] |= CAN_ERROR1_TXPASSIVE;
-            }
-          else if (prev_errcnt >= 128)
-            {
-              msg.cm_hdr.ch_id |= CAN_ERROR_RESTARTED;
-            }
         }
-      else if (prev_errcnt >= 96)
-        {
-          msg.cm_hdr.ch_id |= CAN_ERROR_RESTARTED;
-        }
+    }
+  else if (prev_errcnt >= 96)
+    {
+      msg.cm_hdr.ch_id |= CAN_ERROR_RESTARTED;
     }
   
   /* Forwarding an error message to the app *********************************/
@@ -1481,26 +1512,14 @@ void tivacan_handle_errors(FAR struct can_dev_s *dev)
   if (msg.cm_hdr.ch_id)
     {
       /* If there was a good reason to send an error message, send it */
-      int tmp = can_receive(dev, &msg.cm_hdr, msg.cm_data);
+      ret = can_receive(dev, &msg.cm_hdr, msg.cm_data);
       
-      if (tmp < 0)
+      /* Differentiate between "error message successfully sent" and
+       * "no error message required" for the caller.
+       */
+      if (ret >= 0)
         {
-          /* The application is too busy... turn off status interrupts and
-           * try again in a little while.
-           */
-          modreg32(0, TIVA_CAN_CTL_SIE, canmod->base + TIVA_CAN_OFFSET_CTL);
-          work_queue(HPWORK,
-                     &canmod->error_work,
-                     tivacan_handle_errors_wqueue,
-                     dev,
-                     TIVA_CAN_ERR_HANDLER_TICKS);
-        }
-      else if (cansts & (TIVA_CAN_STS_RXOK | TIVA_CAN_STS_TXOK))
-        {
-          /* The application recovered and so (apparently) did the bus since
-           * we got TXOK or RXOK. Try enabling status interrupts again.
-           */
-          modreg32(TIVA_CAN_CTL_SIE, 0, canmod->base + TIVA_CAN_OFFSET_CTL);
+          ret = 1;
         }
     }
   
@@ -1519,6 +1538,8 @@ save_regs_and_return:
 
   canmod->status = cansts;
   canmod->errors = canerr;
+  
+  return ret;
 }
 
 /****************************************************************************
@@ -1538,12 +1559,33 @@ static int  tivacan_isr(int irq, FAR void *context, FAR void *dev)
   uint32_t canint;
   int      ret = OK;
   
+#ifdef CONFIG_CAN_ERRORS
+  uint32_t reg;
+#endif
+  
   while((canint = getreg32(canmod->base + TIVA_CAN_OFFSET_INT)
                                       & TIVA_CAN_INT_INTID_MASK))
     {
       if (canint == TIVA_CAN_INT_INTID_STATUS)
         {
-          tivacan_handle_errors((FAR struct can_dev_s *)dev);
+          ret = tivacan_handle_errors((FAR struct can_dev_s *)dev);
+          
+#ifdef CONFIG_CAN_ERRORS
+          if (ret < 0)
+            {
+              /* We are spamming the application and it can't keep up...
+               * disable status interrupts and send error messages
+               * periodically.
+               */
+              modreg32(0, TIVA_CAN_CTL_SIE,
+                       canmod->base + TIVA_CAN_OFFSET_CTL);
+              work_queue(HPWORK,
+                         &canmod->error_work,
+                         tivacan_handle_errors_wqueue,
+                         dev,
+                         TIVA_CAN_ERR_HANDLER_TICKS);
+            }
+#endif
           continue;
         }
       else
@@ -1567,14 +1609,36 @@ static int  tivacan_isr(int irq, FAR void *context, FAR void *dev)
           
           if (canint >= TIVA_CAN_TX_FIFO_START + 1)
             {
-              if (canint == TIVA_CAN_TX_FIFO_START + canmod->tx_fifo_tail + 1)
+              /* tx_fifo_tail contains the index of the next mailbox in the
+               * hardware TX FIFO; i.e. where the next message will be put.
+               * It is always one more than the last message to be added to
+               * the FIFO, so even though canint is one-indexed and
+               * TIVA_CAN_FIFO_START is zero-indexed we do not add 1 here.
+               */
+              if (canint == TIVA_CAN_TX_FIFO_START + canmod->tx_fifo_tail)
                 {
-                  /* Only wake up the write thread when we've emptied the FIFO;
-                   * the Tiva CAN module doesn't support a TX ring buffer.
+                  /* Only wake up the write thread when we've emptied the
+                   * FIFO; the Tiva CAN module doesn't support a TX ring
+                   * buffer.
                    */
                   can_txready(dev);
                   canmod->tx_fifo_tail = 0;
                 }
+#ifdef CONFIG_CAN_ERRORS
+              reg = getreg32(canmod->base + TIVA_CAN_OFFSET_CTL);
+              
+              if (! (reg & TIVA_CAN_CTL_SIE))
+                {
+                  /* The application is not overwhelmed (it was able to call
+                   * write()) and the message was successfully sent.
+                   * Re-enable status interrupts to immediately notify of
+                   * e.g. lost arbitration.
+                   */
+                  work_cancel(HPWORK, &canmod->error_work);
+                  putreg32(reg | TIVA_CAN_CTL_SIE,
+                          canmod->base + TIVA_CAN_OFFSET_CTL);
+                }
+#endif
             }
           else
             {
