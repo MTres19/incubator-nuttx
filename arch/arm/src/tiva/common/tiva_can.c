@@ -922,13 +922,43 @@ static int tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
       
       case CANIOC_GET_CONNMODES:
         {
-          ret = -ENOSYS;
+          FAR struct canioc_connmodes_s *modes =
+                                        (FAR struct canioc_connmodes_s *)arg;
+          uint32_t reg = getreg32(canmod->base + TIVA_CAN_OFFSET_TST);
+          
+          modes->bm_loopback = reg & TIVA_CAN_TST_LBACK;
+          modes->bm_silent   = reg & TIVA_CAN_TST_SILENT;
+          ret = OK;
         }
         break;
       
       case CANIOC_SET_CONNMODES:
         {
-          ret = -ENOSYS;
+          FAR struct canioc_connmodes_s *modes =
+                                        (FAR struct canioc_connmodes_s *)arg;
+          irqstate_t flags = enter_critical_section();
+          uint32_t reg = getreg32(canmod->base + TIVA_CAN_OFFSET_TST);
+          if (modes->bm_loopback)
+            {
+              reg |= TIVA_CAN_TST_LBACK;
+            }
+          else
+            {
+              reg &= ~TIVA_CAN_TST_LBACK;
+            }
+          if (modes->bm_silent)
+            {
+              reg |= TIVA_CAN_TST_SILENT;
+            }
+          else
+            {
+              reg &= ~TIVA_CAN_TST_SILENT;
+            }
+          
+          putreg32(reg, canmod->base + TIVA_CAN_OFFSET_TST);
+          leave_critical_section(flags);
+          
+          ret = OK;
         }
         break;
       
