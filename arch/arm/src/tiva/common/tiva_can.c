@@ -67,16 +67,19 @@
 #define tivacan_get_nwda32(base) tivacan_readsplitreg32((base), TIVA_CAN_OFFSET_NWDA1, TIVA_CAN_OFFSET_NWDA2)
 #define tivacan_get_txrq32(base) tivacan_readsplitreg32((base), TIVA_CAN_OFFSET_TXRQ1, TIVA_CAN_OFFSET_TXRQ2)
 
-/* Only the last mailbox is used for TX to help ensure that responses to
- * remote request frames we send are always collected by an RX FIFO and not
+/* Only the last few mailboxes are used for TX to help ensure that responses
+ * to remote request frames we send are always collected by an RX FIFO and not
  * by the mailbox used to send the remote frame. (The Tiva hardware uses the
  * the mailbox with the lowest number first.)
+ * 
+ * This number is zero-indexed, althought the Command Request Register isn't.
  */
-#define TIVA_CAN_TX_MBOX_MASK 0x80000000
-#define TIVA_CAN_TX_MBOX_NUM  32
+#define TIVA_CAN_TX_FIFO_START (TIVA_CAN_NUM_MBOXES - CONFIG_TIVA_CAN_TX_FIFO_DEPTH - 1)
 
+/* Frequency of async error message reporting when rate-limited */
 #define TIVA_CAN_ERR_HANDLER_TICKS MSEC2TICK(CONFIG_TIVA_CAN_ERR_HANDLER_PER)
 
+/* For the RX receive kthread */
 #define TIVA_CAN_KTHREAD_STACKSIZE 1024
 
 /****************************************************************************
@@ -139,19 +142,28 @@ struct tiva_canmod_s
   /* Interface registers base address reserved exclusively for the ISR */
   uint32_t  isr_iface_base;
   
-  /* RX filter FIFOs */
-  mutex_t   fifo_mtx;
-  tiva_can_fifo_t fifos[CONFIG_TIVA_CAN_FILTERS_MAX];
-  
-  /* Pointer to default FIFO initialized by the driver. Only software FIFOs
-   * are used for TX because the hardware does not support arbitration on
-   * outbound messages and this driver wants to be portable to the SocketCAN
-   * model which (I think) performs software arbitration.
-   * 
-   * This driver uses mailbox 32 (or 31, depending on how you look at it)
-   * for TX. (See TIVA_CAN_TX_MBOX_NUM)
+  /* Mutex for claiming, freeing, and potentially resizing RX FIFOs.
+   * The TX FIFO should never be resized at runtime.
    */
+  mutex_t   fifo_mtx;
+  
+  /* All RX FIFOs + 1 TX FIFO */
+  tiva_can_fifo_t fifos[CONFIG_TIVA_CAN_FILTERS_MAX + 1];
+  
+  /* Pointer to default catch-all RX FIFO initialized by the driver. */
   FAR tiva_can_fifo_t *rxdefault_fifo;
+  
+  /* Pointer to the permanent, fixed-size TX FIFO. This is always located at
+   * the end of the series of mailboxes to help ensure that responses to
+   * remote request frames go to an RX (filter) FIFO and don't interfere.
+   */
+  FAR tiva_can_fifo_t *tx_fifo;
+  
+  /* Index in the TX FIFO where new messages should be added. The Tiva CAN
+   * module doesn't support a ring buffer, so new messages are only added
+   * when the TX FIFO is empty (tx_fifo_tail == 0).
+   */
+  int tx_fifo_tail;
 };
 
 /* This structure represents the CAN bit timing parameters */
@@ -466,21 +478,25 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
    * 
    * The MCTL.UMASK bit is set in tivacan_send.
    */
-  reg = TIVA_CANIF_MSK1_IDMSK_EXT_MASK;
-  putreg32(reg, canmod->thd_iface_base + TIVA_CANIF_OFFSET_MSK1);
-  reg = TIVA_CANIF_MSK2_IDMSK_EXT_MASK
-        | TIVA_CANIF_MSK2_MDIR
-        | TIVA_CANIF_MSK2_MXTD;
-  putreg32(reg, canmod->thd_iface_base + TIVA_CANIF_OFFSET_MSK2);
-  
-  putreg32(TIVA_CANIF_CMSK_MASK,
-           canmod->thd_iface_base + TIVA_CANIF_OFFSET_CMSK);
-  putreg32(TIVA_CAN_TX_MBOX_NUM,
-           canmod->thd_iface_base + TIVA_CANIF_OFFSET_CRQ);
-  
-  /* Wait for request to process */
-  while (getreg32(canmod->thd_iface_base + TIVA_CANIF_OFFSET_CRQ)
-          & TIVA_CANIF_CRQ_BUSY);
+  for (int i = TIVA_CAN_TX_FIFO_START; i < TIVA_CAN_NUM_MBOXES; ++i)
+    {
+      reg = TIVA_CANIF_MSK1_IDMSK_EXT_MASK;
+      putreg32(reg, canmod->thd_iface_base + TIVA_CANIF_OFFSET_MSK1);
+      reg = TIVA_CANIF_MSK2_IDMSK_EXT_MASK
+            | TIVA_CANIF_MSK2_MDIR
+            | TIVA_CANIF_MSK2_MXTD;
+      putreg32(reg, canmod->thd_iface_base + TIVA_CANIF_OFFSET_MSK2);
+      
+      putreg32(TIVA_CANIF_CMSK_MASK,
+              canmod->thd_iface_base + TIVA_CANIF_OFFSET_CMSK);
+      
+      /* One-indexed */
+      putreg32(i + 1, canmod->thd_iface_base + TIVA_CANIF_OFFSET_CRQ);
+      
+      /* Wait for request to process */
+      while (getreg32(canmod->thd_iface_base + TIVA_CANIF_OFFSET_CRQ)
+              & TIVA_CANIF_CRQ_BUSY);
+    }
   
   nxmutex_unlock(&canmod->thd_iface_mtx);
   
@@ -527,6 +543,13 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
 #ifdef CONFIG_CAN_ERRORS
   modifyreg32(canmod->base + TIVA_CAN_OFFSET_CTL, 0, TIVA_CAN_CTL_SIE);
 #endif
+  
+  /* The TX FIFO is manually allocated first because it must be located at the
+   * end of the series of mailboxes to make sure responses to remote frames
+   * go to the correct place.
+   */
+  canmod->fifos[0] = 0xffffffff << (32 - CONFIG_TIVA_CAN_TX_FIFO_DEPTH);
+  canmod->tx_fifo = &canmod->fifos[0];
   
   ret = tivacan_alloc_fifo(dev, CONFIG_TIVA_CAN_DEFAULT_FIFO_DEPTH);
   if (ret < 0)
@@ -602,6 +625,10 @@ static void tivacan_shutdown(FAR struct can_dev_s *dev)
     }
   }
   
+  /* Free the TX FIFO */
+  
+  tivacan_free_fifo(dev, canmod->tx_fifo);
+  
   /* Disable interrupts from the CAN module */
   modifyreg32(canmod->base + TIVA_CAN_OFFSET_CTL,
               TIVA_CAN_CTL_EIE | TIVA_CAN_CTL_SIE | TIVA_CAN_CTL_IE, 0);
@@ -654,8 +681,6 @@ int tivacan_rxhandler(int argc, char** argv)
   
   for (;;)
     {
-      memset(&msg, 0, sizeof(struct can_msg_s));
-      
       nxsem_wait(&canmod->rxsem);
       nxmutex_lock(&canmod->thd_iface_mtx);
       
@@ -666,7 +691,9 @@ int tivacan_rxhandler(int argc, char** argv)
        * the FIFO were emptied. (Besides, the ISR clears CANINT).
        */
       
-      for (*mbox = 0; *mbox < TIVA_CAN_NUM_MBOXES; ++*mbox)
+      for (*mbox = 0;
+           *mbox < TIVA_CAN_NUM_MBOXES - CONFIG_TIVA_CAN_TX_FIFO_DEPTH;
+          ++*mbox)
         {
           uint32_t reg;
           
@@ -675,12 +702,14 @@ int tivacan_rxhandler(int argc, char** argv)
                                        TIVA_CAN_OFFSET_NWDA1,
                                        TIVA_CAN_OFFSET_NWDA2);
           
-          if (!(reg & ~TIVA_CAN_TX_MBOX_MASK))
+          if (!(reg & ~*(canmod->tx_fifo)))
             {
+              /* No new messages to process in the RX FIFOs */
               break;
             }
           else if (! (reg & 1 << *mbox))
             {
+              /* No new message in this mailbox */
               continue;
             }
           
@@ -1000,7 +1029,8 @@ static int tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
  * 
  * Description:
  *   Enqueue a message to transmit into the hardware FIFO. Returns
- *   immediately if the FIFO is full.
+ *   immediately if the FIFO is full. This function must not fail when
+ *   tivacan_txready returns true, or the message will be lost.
  *   
  *   A pointer to this function is passed to can_register.
  * 
@@ -1014,18 +1044,21 @@ static int tivacan_ioctl(FAR struct can_dev_s *dev, int cmd, unsigned long arg)
 
 static int tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
 {
-  /* TODO: process status register here */
   FAR struct tiva_canmod_s *canmod = dev->cd_priv;
   uint32_t reg = 0;
   
+  /* REVISIT: Should can_txdone be called to advance the FIFO buffer
+   * head when dev_send is called when it shouldn't be?
+   */
   if (canmod->status & TIVA_CAN_STS_BOFF)
     {
+      can_txdone(dev);
       return -ENETDOWN;
     }
   
-  if (!tivacan_txempty(dev))
+  if (canmod->tx_fifo_tail >= CONFIG_TIVA_CAN_TX_FIFO_DEPTH)
     {
-      canerr("Cannot send message - TX mailbox in use.\n");
+      can_txdone(dev);
       return -EBUSY;
     }
     
@@ -1035,7 +1068,8 @@ static int tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
    * previously used for a remote frame and could receive messages, causing
    * an SRAM conflict. TIVA_CAN_TX_MBOX_NUM is 1-indexed.
    */
-  tivacan_disable_mbox(dev, canmod->thd_iface_base, TIVA_CAN_TX_MBOX_NUM - 1);
+  tivacan_disable_mbox(dev, canmod->thd_iface_base,
+                       TIVA_CAN_TX_FIFO_START + canmod->tx_fifo_tail);
   
   /* Command mask register */
   
@@ -1103,8 +1137,8 @@ static int tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
       putreg32(reg, canmod->thd_iface_base + TIVA_CANIF_OFFSET_DATA(i));
     }
   
-  /* Submit request */
-  putreg32(TIVA_CAN_TX_MBOX_NUM,
+  /* Submit request; this register is one-indexed. */
+  putreg32(TIVA_CAN_TX_FIFO_START + canmod->tx_fifo_tail + 1,
            canmod->thd_iface_base + TIVA_CANIF_OFFSET_CRQ);
   
   /* Wait for completion */
@@ -1112,6 +1146,14 @@ static int tivacan_send(FAR struct can_dev_s *dev, FAR struct can_msg_s *msg)
           & TIVA_CANIF_CRQ_BUSY);
   
   nxmutex_unlock(&canmod->thd_iface_mtx);
+  
+  /* Move to the next message in the h/w TX FIFO.
+   * Tell the upper-half the message has been submitted... this recurses
+   * back on us until the software TX FIFO is empty.
+   */
+  ++canmod->tx_fifo_tail;
+  can_txdone(dev);
+  
   return OK;
 }
 
@@ -1140,14 +1182,17 @@ static bool tivacan_txready(FAR struct can_dev_s *dev)
     return false;
   }
   
-  return tivacan_txempty(dev);
+  return (canmod->tx_fifo_tail < CONFIG_TIVA_CAN_TX_FIFO_DEPTH - 1);
 }
 
 /****************************************************************************
  * Name: tivacan_txempty
  * 
  * Description:
- *   Determines whether the TX FIFO is empty.
+ *   Determines whether the TX FIFO is empty. Because the CAN_TXREADY
+ *   interface is used, this function has a special connotation: it indicates
+ *   whether can_txready is going to be called in the future to start the
+ *   work queue that feeds the TX hardware FIFO.
  *   
  *   A pointer to this function is passed to can_register.
  * 
@@ -1161,10 +1206,8 @@ static bool tivacan_txready(FAR struct can_dev_s *dev)
 static bool tivacan_txempty(FAR struct can_dev_s *dev)
 {
   FAR struct tiva_canmod_s *canmod = dev->cd_priv;
-  uint32_t txrq = tivacan_readsplitreg32(canmod->base, TIVA_CAN_OFFSET_TXRQ1,
-                                         TIVA_CAN_OFFSET_TXRQ2);
   
-  return !(txrq & TIVA_CAN_TX_MBOX_MASK);
+  return (canmod->tx_fifo_tail == 0);
 }
 
 /*****************************************************************************
@@ -1519,9 +1562,16 @@ static int  tivacan_isr(int irq, FAR void *context, FAR void *dev)
           while (getreg32(canmod->isr_iface_base + TIVA_CANIF_OFFSET_CRQ)
                   & TIVA_CANIF_CRQ_BUSY);
           
-          if (canint == TIVA_CAN_TX_MBOX_NUM)
+          if (canint >= TIVA_CAN_TX_FIFO_START + 1)
             {
-              can_txdone(dev);
+              if (canint == TIVA_CAN_TX_FIFO_START + canmod->tx_fifo_tail + 1)
+                {
+                  /* Only wake up the write thread when we've emptied the FIFO;
+                   * the Tiva CAN module doesn't support a TX ring buffer.
+                   */
+                  can_txready(dev);
+                  canmod->tx_fifo_tail = 0;
+                }
             }
           else
             {
@@ -1700,7 +1750,7 @@ static void tivacan_bittiming_set(FAR struct can_dev_s *dev,
 int tivacan_alloc_fifo(FAR struct can_dev_s *dev, int depth)
 {
   /* Mailbox 32 (aka 31) is always claimed for TX */
-  tiva_can_fifo_t claimed = TIVA_CAN_TX_MBOX_MASK;
+  tiva_can_fifo_t claimed = 0;
   int i;
   int numclaimed = 0;
   int free_fifo_idx = -1;
@@ -1708,9 +1758,9 @@ int tivacan_alloc_fifo(FAR struct can_dev_s *dev, int depth)
   
   nxmutex_lock(&canmod->fifo_mtx);
   
-  /* Mailboxes allocated other RX FIFOs */
+  /* Mailboxes allocated other RX FIFOs or the TX FIFO */
   
-  for (i = 0; i < CONFIG_TIVA_CAN_FILTERS_MAX; ++i)
+  for (i = 0; i < CONFIG_TIVA_CAN_FILTERS_MAX + 1; ++i)
     {
       if (canmod->fifos[i] == 0)
         {
@@ -1729,7 +1779,8 @@ int tivacan_alloc_fifo(FAR struct can_dev_s *dev, int depth)
   /* Mailboxes that are available to be allocated to this FIFO */
   claimed = ~claimed;
   
-  for (i = 0; i < TIVA_CAN_NUM_MBOXES && numclaimed < depth; ++i)
+  for (i = 0; i < (TIVA_CAN_NUM_MBOXES - CONFIG_TIVA_CAN_TX_FIFO_DEPTH)
+              && numclaimed < depth; ++i)
     {
       if (claimed & 1 << i)
         {
