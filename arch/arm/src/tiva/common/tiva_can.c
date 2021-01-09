@@ -359,7 +359,8 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
   int       ret;
   uint32_t  reg;
   FAR struct tiva_canmod_s    *canmod = dev->cd_priv;
-  char     *kthd_argv[] = { "N", ""};
+  char     *kthd_argv[2];
+  kthd_argv[1] = NULL;
   
   ret = nxsem_init(&canmod->rxsem, 0, 0);
   
@@ -373,7 +374,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
 #ifdef CONFIG_TIVA_CAN0
       case 0:
         {
-          kthd_argv[0][0] = '0';
+          kthd_argv[0] = "0";
           ret = kthread_create("Tiva CAN0", CONFIG_TIVA_CAN0_PRIO,
                                 TIVA_CAN_KTHREAD_STACKSIZE, tivacan_rxhandler,
                                 kthd_argv);
@@ -383,7 +384,7 @@ static int tivacan_setup(FAR struct can_dev_s *dev)
 #ifdef CONFIG_TIVA_CAN1
       case 1:
         {
-          kthd_argv[0][0] = '1';
+          kthd_argv[0] = "1";
           ret = kthread_create("Tiva CAN1", CONFIG_TIVA_CAN1_PRIO,
                                 TIVA_CAN_KTHREAD_STACKSIZE, tivacan_rxhandler,
                                 kthd_argv);
@@ -655,7 +656,9 @@ int tivacan_rxhandler(int argc, char** argv)
   struct can_msg_s msg;
   int      ret;
   
-  switch (argv[0][0])
+  /* argv[0] contains the thread name */
+  
+  switch (argv[1][0])
     {
 #ifdef CONFIG_TIVA_CAN0
       case '0':
