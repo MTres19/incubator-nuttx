@@ -845,7 +845,7 @@ int tivacan_rxhandler(int argc, char** argv)
            * being received successfully.
            */
 
-          work_cancel(HPWORK, &canmod->error_work);
+          work_cancel(LPWORK, &canmod->error_work);
           modifyreg32(canmod->base + TIVA_CAN_OFFSET_CTL,
                       0, TIVA_CAN_CTL_SIE);
         }
@@ -1376,7 +1376,7 @@ void tivacan_handle_errors_wqueue(FAR void * dev)
 
   flags = enter_critical_section();
   tivacan_handle_errors((FAR struct can_dev_s *)dev);
-  work_queue(HPWORK,
+  work_queue(LPWORK,
              &canmod->error_work,
              tivacan_handle_errors_wqueue,
              dev,
@@ -1703,7 +1703,7 @@ static int  tivacan_isr(int irq, FAR void *context, FAR void *dev)
 
               modreg32(0, TIVA_CAN_CTL_SIE,
                        canmod->base + TIVA_CAN_OFFSET_CTL);
-              work_queue(HPWORK,
+              work_queue(LPWORK,
                          &canmod->error_work,
                          tivacan_handle_errors_wqueue,
                          dev,
@@ -1765,7 +1765,7 @@ static int  tivacan_isr(int irq, FAR void *context, FAR void *dev)
                    * e.g. lost arbitration.
                    */
 
-                  work_cancel(HPWORK, &canmod->error_work);
+                  work_cancel(LPWORK, &canmod->error_work);
                   putreg32(reg | TIVA_CAN_CTL_SIE,
                           canmod->base + TIVA_CAN_OFFSET_CTL);
                 }
