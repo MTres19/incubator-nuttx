@@ -863,11 +863,12 @@ int tivacan_rxhandler(int argc, char** argv)
  * Name: tivacan_rxintctl
  *
  * Description:
- *   The Tiva CAN modules do not allow individual control of TX
- *   and RX interrupts, so this function does nothing. Interrupts
- *   are enabled and disabled in tivacan_setup and tivacan_shutdown.
- *
- *   A pointer to this function is passed to can_register
+ *   The upper-half driver does not make meaningful use of this function,
+ *   so there is no need to implement it. In theory it might be used so that
+ *   messages are not received before the upper-half software FIFOs are
+ *   initialized, but that code executes in a critical section so it
+ *   doesn't make any difference anyway. And continuing to receive messages
+ *   while the TX FIFO drains is not a problem.
  *
  * Input parameters:
  *   dev - An instance of the "upper half" CAN driver structure
@@ -885,11 +886,9 @@ static void tivacan_rxintctl(FAR struct can_dev_s *dev, bool enable)
  * Name tivacan_txintctl
  *
  * Description:
- *   The Tiva CAN modules do not allow individual control of TX
- *   and RX interrupts, so this function does nothing. Interrupts
- *   are enabled and disabled in tivacan_setup and tivacan_shutdown.
- *
- *   A pointer to this function is passed to can_register.
+ *   The upper-half driver does not make meaningful use of this function
+ *   (at least when CONFIG_CAN_TXREADY is enabled), so there is no need to
+ *   implement it.
  *
  * Input parameters:
  *   dev - An instance of the "upper half" CAN driver structure
