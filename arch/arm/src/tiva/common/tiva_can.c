@@ -1231,8 +1231,8 @@ static bool tivacan_txready(FAR struct can_dev_s *dev)
   {
     return false;
   }
-  
-  return (canmod->tx_fifo_tail < CONFIG_TIVA_CAN_TX_FIFO_DEPTH - 1);
+
+  return (canmod->tx_fifo_tail < CONFIG_TIVA_CAN_TX_FIFO_DEPTH);
 }
 
 /****************************************************************************
