@@ -1533,12 +1533,12 @@ config TIVA_CAN_TX_FIFO_DEPTH
 		reduces jitter caused by excessive interrupts. However, it
 		occupies extra mailboxes that might be used for more fine-
 		grained filtering; hence there is a trade-off.
-		
+
 		Because the mailboxes on the Tiva chips cannot be used as
 		a ring buffer for outbound messages, a larger TX FIFO
 		directly increases the maximum number of messages that
 		can be sent in a "burst" at maximum speed.
-		
+
 		However, the TX FIFO makes implementation of
 		"pre-arbitration" more difficult. Although the classic
 		character device CAN model does not support this anyway,
@@ -1590,7 +1590,7 @@ config TIVA_CAN_ERR_HANDLER_PER
 		to keep up. This can easily happen during testing if no
 		transceiver is connected and the application is trying
 		to print error messages to a serial console.
-		
+
 		When this happens, the driver defers error reporting to
 		a periodic task in the high-priority work queue. The task
 		checks for errors and reports them at the specified

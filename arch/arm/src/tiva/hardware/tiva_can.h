@@ -4,7 +4,7 @@
  *   Copyright (C) 2006-2020 Texas Instruments Incorporated.
  *                           All rights reserved.
  *   Author: Matthew Trescott <matthewtrescott@gmail.com>
- * 
+ *
  * From the TivaWare Peripheral Driver Library, with minor changes for
  * clarity and style.
  *
@@ -67,7 +67,6 @@
 /* Note: driver code uses a 32-bit bitmask to represent the message objects */
 
 #define TIVA_CAN_NUM_MBOXES      32             /* Number of slots in the message SRAM */
-
 
 /****************************************************************************
  * The following are defines for the CAN register offsets.
@@ -215,9 +214,9 @@
 #define TIVA_CAN_CTL_IE         0x00000002  /* CAN Interrupt Enable             */
 #define TIVA_CAN_CTL_INIT       0x00000001  /* Initialization                   */
 
-/*****************************************************************************
+/****************************************************************************
  * The following are defines for the bit fields in the CANSTS register
- *****************************************************************************/
+ ****************************************************************************/
 
 #define TIVA_CAN_STS_BOFF           0x00000080  /* Bus-Off Status                   */
 #define TIVA_CAN_STS_EWARN          0x00000040  /* Warning Status                   */
@@ -269,7 +268,7 @@
 #define TIVA_CAN_SJW_MAX            4
 
 /****************************************************************************
- * The following are defines for the bit fields in the CANINT register.  
+ * The following are defines for the bit fields in the CANINT register.
  ****************************************************************************/
 
 #define TIVA_CAN_INT_INTID_MASK     0x0000FFFF  /* Interrupt Identifier */

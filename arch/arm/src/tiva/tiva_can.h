@@ -17,7 +17,7 @@
  * License for the specific language governing permissions and limitations
  * under the License.
  *
- ****************************************************************************/ 
+ ****************************************************************************/
 
 #ifndef __ARCH_ARM_SRC_TIVA_TIVA_CAN_H
 #define __ARCH_ARM_SRC_TIVA_TIVA_CAN_H
@@ -34,46 +34,6 @@
  ****************************************************************************/
 
 #if defined(CONFIG_CAN) && (defined(CONFIG_TIVA_CAN0) || defined(CONFIG_TIVA_CAN1))
-
-/* Tiva-specific Ioctl Commands *********************************************
- * 
- * TODO: None of these are implemented yet.
- * 
- * CANIOC_TIVA_RXFILTER_FIFO_MAXDEPTH_GET
- *   Description:     Returns the maximum size of the filter's RX FIFO
- *                    (not the actual size of the FIFO). For Tiva CAN
- *                    modules, this is based on the number of mailboxes
- *                    allocated to the other RX filter FIFOs.
- *   Argument:        The filter ID returned by CANIOC_ADD_STDFILTER or
- *                    CANIOC_ADD_EXTFILTER
- *   Returned value:  The filter's maximum possible filter depth, based
- *                    on the size of the TX FIFO and the other RX filter
- *                    FIFOs.
- * 
- * CANIOC_TIVA_RXFILTER_FIFO_DEPTH_GET
- *   Description:     Returns the current size of the filter's RX FIFO.
- *   Argument:        The filter ID returned by CANIOC_ADD_STDFILTER or
- *                    CANIOC_ADD_EXTFILTER
- *   Returned value:  The filter's FIFO depth, i.e. the number of messages
- *                    it can store.
- * 
- * CANIOC_TIVA_RXFILTER_FIFO_DEPTH_SET
- *   Description:     Set the FIFO depth for an RX filter.
- *   Argument:        The filter ID returned by CANIOC_ADD_STDFILTER or
- *                    CANIOC_ADD_EXTFILTER, with the requested FIFO depth
- *                    shifted left by 16 bits and ORed with filter ID.
- *   Returned value:  Zero on success, a negated errno on failure.
- */
-
-#define CAN_TIVA_FIRST (CAN_FIRST + CAN_NCMDS)
-#define CAN_TIVA_NCMDS 3
-
-#define CANIOC_TIVA_RXFILTER_FIFO_MAXDEPTH_GET  _CANIOC(CAN_TIVA_FIRST + 0)
-#define CANIOC_TIVA_RXFILTER_FIFO_DEPTH_GET     _CANIOC(CAN_TIVA_FIRST + 1)
-#define CANIOC_TIVA_RXFILTER_FIFO_DEPTH_SET     _CANIOC(CAN_TIVA_FIRST + 2)
-
-#define CAN_TIVA_FILTER_TYPE_STD 0
-#define CAN_TIVA_FILTER_TYPE_EXT 1
 
 #ifndef __ASSEMBLY__
 
@@ -104,17 +64,17 @@ extern "C"
 
 /****************************************************************************
  * Name: tiva_can_initialize
- * 
+ *
  * Description:
  *   Initialize the selected CAN module
- * 
+ *
  * Input Parameters:
  *   Device path, a string of the form "/dev/can0" or "/dev/can1"
  *   Module number, for chips with multiple modules (typically 0 or 1)
- * 
+ *
  * Returned Value:
  *   Pointer to can_dev_s (CAN device structure), or NULL on failure.
- * 
+ *
  ****************************************************************************/
 
 int tiva_can_initialize(FAR char *devpath, int modnum);
