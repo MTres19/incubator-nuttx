@@ -430,6 +430,7 @@ config TIVA_CAN
 	default n
 	select ARCH_HAVE_CAN_ERRORS
 	select CAN_TXREADY
+	select CAN_USE_RTR
 
 config TIVA_HAVE_CAN0
 	bool

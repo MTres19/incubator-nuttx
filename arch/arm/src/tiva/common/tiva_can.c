@@ -61,6 +61,10 @@
 
 #if defined(CONFIG_TIVA_CAN) && (defined(CONFIG_TIVA_CAN0) || defined(CONFIG_TIVA_CAN1))
 
+#if defined(CONFIG_CAN_ERRORS) && !defined(CONFIG_SCHED_LPWORK)
+#  error "Error reporting requires the low-priority work queue to be enabled."
+#endif
+
 /* Combines two 16-bit registers into a single 32 bit value */
 #define tivacan_readsplitreg32(base, r1, r2) ((getreg32((base) + (r1)) & 0xffff) | (getreg32((base) + (r2)) << 16))
 
